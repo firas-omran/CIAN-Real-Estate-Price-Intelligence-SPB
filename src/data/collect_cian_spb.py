@@ -37,6 +37,7 @@ NORMALIZED_COLUMNS = [
     "deal_type",
     "accommodation_type",
     "author_type",
+    "room_segment",
     "rooms_count",
     "total_meters",
     "price",
@@ -99,6 +100,9 @@ def normalize_cian_frame(df: pd.DataFrame) -> pd.DataFrame:
         if column not in normalized.columns:
             normalized[column] = pd.NA
 
+    if "room_segment" in normalized.columns:
+        normalized.loc[normalized["room_segment"].eq("studio"), "rooms_count"] = 0
+
     normalized = normalized[NORMALIZED_COLUMNS]
     normalized = normalized.dropna(subset=["price", "total_meters"])
     normalized = normalized[normalized["price"] > 0]
@@ -160,6 +164,12 @@ def main() -> None:
         description="Collect a diverse CIAN sale dataset for Saint Petersburg."
     )
     parser.add_argument(
+        "--normalize-existing-raw",
+        type=Path,
+        default=None,
+        help="Normalize an existing raw CIAN CSV without collecting new data.",
+    )
+    parser.add_argument(
         "--pages",
         type=int,
         default=10,
@@ -188,6 +198,19 @@ def main() -> None:
         help="Optional HTTPS proxy, e.g. http://user:pass@host:port.",
     )
     args = parser.parse_args()
+
+    if args.normalize_existing_raw:
+        raw = pd.read_csv(args.normalize_existing_raw)
+        normalized = normalize_cian_frame(raw)
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        output_path = args.output_dir / f"cian_spb_normalized_{timestamp}.csv"
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        normalized.to_csv(output_path, index=False)
+        print(f"Normalized existing raw: {args.normalize_existing_raw} -> {output_path}")
+        print(f"Normalized rows: {len(normalized)}")
+        print("Normalized columns:")
+        print(", ".join(normalized.columns))
+        return
 
     collect_spb_dataset(
         pages=args.pages,

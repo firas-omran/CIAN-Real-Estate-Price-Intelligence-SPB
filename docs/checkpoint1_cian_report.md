@@ -37,21 +37,22 @@ Current cleaned dataset:
 |---|---:|
 | Raw rows | 1400 |
 | Raw normalized rows | 1359 |
-| Clean rows | 1265 |
-| Removed rows | 94 |
-| Median price | 18,623,690 RUB |
-| Mean price | 37,634,262 RUB |
-| Median area | 60.1 m2 |
-| Median price per m2 | 340,633 RUB |
+| Clean rows | 1304 |
+| Removed rows | 55 |
+| Median price | 17,632,490 RUB |
+| Mean price | 36,390,040 RUB |
+| Median area | 58.0 m2 |
+| Median price per m2 | 338,593 RUB |
 
 Room distribution after cleaning:
 
 | Rooms | Listings |
 |---:|---:|
-| 1 | 466 |
-| 2 | 269 |
-| 3 | 260 |
-| 4 | 270 |
+| 0 / studio | 264 |
+| 1 | 260 |
+| 2 | 262 |
+| 3 | 255 |
+| 4 | 263 |
 
 Generated figures:
 - `data/processed/figures/price_distribution.png`;
@@ -106,10 +107,10 @@ Current baseline results on an 80/20 reproducible split:
 
 | Baseline | MAE, RUB | RMSE, RUB | MAPE | MdAPE | WAPE |
 |---|---:|---:|---:|---:|---:|
-| B0 global median price | 29,263,930 | 57,890,370 | 72.91% | 63.66% | 72.12% |
-| B1 median price/m2 by rooms * area | 20,678,910 | 43,692,770 | 48.78% | 42.54% | 50.96% |
-| B2 median price/m2 by district+rooms * area | 15,421,100 | 34,708,800 | 33.63% | 21.22% | 38.01% |
-| B3 comparable-listings KNN baseline | 14,614,250 | 33,161,390 | 31.71% | 19.82% | 36.02% |
+| B0 global median price | 29,209,670 | 61,041,630 | 79.33% | 67.03% | 74.51% |
+| B1 median price/m2 by rooms * area | 19,393,620 | 42,701,920 | 47.86% | 42.39% | 49.47% |
+| B2 median price/m2 by district+rooms * area | 14,357,990 | 34,653,230 | 31.74% | 19.96% | 36.63% |
+| B3 comparable-listings KNN baseline | 13,856,320 | 30,604,180 | 32.31% | 20.32% | 35.35% |
 
 Conclusion: local market context matters. Moving from a global median to district/rooms and comparable-listing baselines substantially improves error, which supports the supervisor's suggestion to include neighborhood-level and KNN-style information.
 

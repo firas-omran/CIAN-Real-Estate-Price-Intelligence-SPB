@@ -37,7 +37,7 @@
 
 **Current snapshot:** fresh listings collected on 2026-05-05 local time from CIAN pages available at collection time. This is not a publication-date guarantee; it is a collection timestamp.
 
-**Current cleaned sample:** 1265 listings after validation and cleaning from 1359 normalized rows and 1400 raw rows.
+**Current cleaned sample:** 1304 listings after validation and cleaning from 1359 normalized rows and 1400 raw rows. Studio listings are preserved as `room_segment=studio` and `rooms_count=0`.
 
 **Raw storage:** `data/raw/cian_spb_raw_*.csv`.
 
@@ -71,7 +71,7 @@
 - B2 median price per m2 by district and room count multiplied by area;
 - B3 comparable-listings KNN baseline: same district and room count, nearest areas, median price per m2.
 
-Current best non-ML baseline is B3 with MdAPE 19.82% and WAPE 36.02% on a reproducible 80/20 split.
+Current best non-ML baselines are B2/B3 with MdAPE around 20% on a reproducible 80/20 split after preserving studios as a separate segment.
 
 **Training loss for future ML:** RMSE/MAE on `log1p(price)`.
 
@@ -130,7 +130,9 @@ Main layers:
 
 **Checkpoint 1:** fresh data source, EDA, contract, architecture, baselines, risks.
 
-**Checkpoint 2:** ETL pipeline, feature registry, offline/online features, DFD.
+**Checkpoint 2:** ETL pipeline, feature registry, offline/online features, DFD. Implemented artifacts:
+`src/pipeline/run_data_pipeline.py`, `src/features/build_features.py`, `docs/feature_registry.md`,
+`docs/dfd_checkpoint2.md`, and balanced sample by `rooms_count`.
 
 **Checkpoint 3:** train at least two model classes, experiment tracking, retraining strategy.
 

@@ -52,6 +52,10 @@ def clean_cian_frame(df: pd.DataFrame) -> pd.DataFrame:
     elif "url" in cleaned.columns:
         cleaned = cleaned.drop_duplicates(subset=["url"])
 
+    if "room_segment" in cleaned.columns:
+        cleaned["room_segment"] = cleaned["room_segment"].fillna("unknown").astype(str).str.strip()
+        cleaned.loc[cleaned["room_segment"].eq("studio"), "rooms_count"] = 0
+
     cleaned = cleaned.dropna(subset=["price", "total_meters", "rooms_count"])
     cleaned = cleaned[cleaned["price"].between(1_000_000, 600_000_000)]
     cleaned = cleaned[cleaned["total_meters"].between(10, 500)]
@@ -68,7 +72,7 @@ def clean_cian_frame(df: pd.DataFrame) -> pd.DataFrame:
         cleaned["is_first_floor"] = cleaned["floor"].eq(1)
         cleaned["is_last_floor"] = cleaned["floor"].eq(cleaned["floors_count"])
 
-    text_columns = ["district", "street", "underground", "residential_complex", "author_type"]
+    text_columns = ["district", "street", "underground", "residential_complex", "author_type", "room_segment"]
     for column in text_columns:
         if column in cleaned.columns:
             cleaned[column] = cleaned[column].fillna("unknown").astype(str).str.strip()

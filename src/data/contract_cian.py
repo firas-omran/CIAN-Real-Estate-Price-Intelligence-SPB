@@ -25,6 +25,11 @@ CIAN_DATA_CONTRACT = {
     "location_query": {"required": True, "allowed_values": ["Санкт-Петербург"], "max_null_pct": 0.0},
     "price": {"required": True, "min": 1_000_000, "max": 600_000_000, "max_null_pct": 0.0},
     "total_meters": {"required": True, "min": 10, "max": 500, "max_null_pct": 0.0},
+    "room_segment": {
+        "required": False,
+        "allowed_values": ["studio", "1room", "2rooms", "3rooms", "4rooms", "unknown"],
+        "max_null_pct": 0.05,
+    },
     "rooms_count": {"required": True, "min": 0, "max": 10, "max_null_pct": 0.02},
     "floor": {"required": False, "min": 1, "max": 100, "max_null_pct": 0.25},
     "floors_count": {"required": False, "min": 1, "max": 100, "max_null_pct": 0.25},

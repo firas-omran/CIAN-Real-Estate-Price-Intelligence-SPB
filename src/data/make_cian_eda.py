@@ -58,6 +58,15 @@ def make_eda(df: pd.DataFrame, figures_dir: Path, summary_path: Path) -> None:
     plt.title("Listings by Rooms")
     save_plot(figures_dir / "rooms_distribution.png")
 
+    if "room_segment" in df.columns:
+        plt.figure(figsize=(9, 5))
+        segment_counts = df["room_segment"].value_counts().sort_index()
+        segment_counts.plot(kind="bar")
+        plt.xlabel("Room segment")
+        plt.ylabel("Listings")
+        plt.title("Listings by Collector Room Segment")
+        save_plot(figures_dir / "room_segment_distribution.png")
+
     plt.figure(figsize=(10, 6))
     top_districts = df[df["district"] != "unknown"]["district"].value_counts().head(15).index
     district_prices = df[df["district"].isin(top_districts)].groupby("district")["price_mln"].median().sort_values()
@@ -92,6 +101,11 @@ def make_eda(df: pd.DataFrame, figures_dir: Path, summary_path: Path) -> None:
 
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     freshness = df["collected_at"].min(), df["collected_at"].max()
+    room_segment_distribution = (
+        df["room_segment"].value_counts().sort_index().to_string()
+        if "room_segment" in df.columns
+        else "not available"
+    )
     summary = f"""# CIAN SPB EDA Summary
 
 - Rows after cleaning: {len(df)}
@@ -103,6 +117,10 @@ def make_eda(df: pd.DataFrame, figures_dir: Path, summary_path: Path) -> None:
 - Room distribution:
 
 {df["rooms_count"].value_counts().sort_index().to_string()}
+
+- Room segment distribution:
+
+{room_segment_distribution}
 
 - Figures directory: `{figures_dir}`
 """

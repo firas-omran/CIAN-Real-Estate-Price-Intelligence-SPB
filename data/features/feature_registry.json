@@ -1,0 +1,112 @@
+[
+  {
+    "feature": "room_segment",
+    "source": "collector segment",
+    "type": "categorical",
+    "offline": true,
+    "online": true,
+    "refresh": "weekly snapshot / user input",
+    "description": "Reliable room segment from collector: studio, 1room, 2rooms, 3rooms, 4rooms.",
+    "leakage_risk": "low"
+  },
+  {
+    "feature": "rooms_count",
+    "source": "CIAN normalized listing",
+    "type": "numeric/categorical",
+    "offline": true,
+    "online": true,
+    "refresh": "weekly snapshot",
+    "description": "Number of rooms parsed from listing segment.",
+    "leakage_risk": "low"
+  },
+  {
+    "feature": "total_meters",
+    "source": "CIAN normalized listing",
+    "type": "numeric",
+    "offline": true,
+    "online": true,
+    "refresh": "per request / listing input",
+    "description": "Apartment area in square meters.",
+    "leakage_risk": "low"
+  },
+  {
+    "feature": "floor_ratio",
+    "source": "floor / floors_count",
+    "type": "numeric",
+    "offline": true,
+    "online": true,
+    "refresh": "per request / listing input",
+    "description": "Relative floor position in the building.",
+    "leakage_risk": "low"
+  },
+  {
+    "feature": "is_first_floor, is_last_floor",
+    "source": "floor, floors_count",
+    "type": "boolean",
+    "offline": true,
+    "online": true,
+    "refresh": "per request / listing input",
+    "description": "Floor-position flags that often affect apartment liquidity and price.",
+    "leakage_risk": "low"
+  },
+  {
+    "feature": "district",
+    "source": "CIAN listing",
+    "type": "categorical",
+    "offline": true,
+    "online": true,
+    "refresh": "weekly snapshot / user input",
+    "description": "District as a coarse spatial market segment.",
+    "leakage_risk": "low"
+  },
+  {
+    "feature": "underground",
+    "source": "CIAN listing",
+    "type": "categorical",
+    "offline": true,
+    "online": true,
+    "refresh": "weekly snapshot / user input",
+    "description": "Nearest metro station proxy when coordinates are unavailable.",
+    "leakage_risk": "low"
+  },
+  {
+    "feature": "district_rooms_median_price_per_sqm",
+    "source": "market aggregate from cleaned CIAN snapshot",
+    "type": "numeric aggregate",
+    "offline": true,
+    "online": true,
+    "refresh": "weekly snapshot",
+    "description": "Median market price per square meter for district and room segment.",
+    "leakage_risk": "medium: compute on train split for experiments"
+  },
+  {
+    "feature": "district_rooms_ads_count",
+    "source": "market aggregate from cleaned CIAN snapshot",
+    "type": "numeric aggregate",
+    "offline": true,
+    "online": true,
+    "refresh": "weekly snapshot",
+    "description": "Number of comparable listings in district and room segment.",
+    "leakage_risk": "low"
+  },
+  {
+    "feature": "underground_median_price_per_sqm",
+    "source": "market aggregate from cleaned CIAN snapshot",
+    "type": "numeric aggregate",
+    "offline": true,
+    "online": true,
+    "refresh": "weekly snapshot",
+    "description": "Median market price per square meter near metro station.",
+    "leakage_risk": "medium: compute on train split for experiments"
+  },
+  {
+    "feature": "price, log_price",
+    "source": "CIAN listing target",
+    "type": "target",
+    "offline": true,
+    "online": false,
+    "refresh": "weekly snapshot",
+    "description": "Training target; log_price is planned modeling target.",
+    "leakage_risk": "target, never use as input feature"
+  }
+]
