@@ -19,10 +19,11 @@ Reason:
 | Extract | CIAN listing pages | raw CSV snapshots | `src/data/collect_cian_spb.py` |
 | Normalize | raw parser output | stable normalized schema | `src/data/collect_cian_spb.py` |
 | Validate | normalized/clean data | contract report | `src/data/contract_cian.py` |
-| Transform / Clean | normalized CSV | clean dataset | `src/data/clean_cian.py` |
-| Feature Engineering | clean dataset | offline features + aggregate tables | `src/features/build_features.py` |
+| Transform / Clean | normalized CSV | clean dataset (broken-row filter via `VALID_SPB_DISTRICTS`) | `src/data/clean_cian.py` |
+| **Geocode** | **clean dataset** | **clean dataset + `lat, lon, geo_precision, distance_to_center_km, distance_to_metro_km, metro_known`** | **`src/features/geocoder.py`** |
+| Feature Engineering | geocoded dataset | offline features (with new target `log_target_price_per_sqm`) + aggregate tables | `src/features/build_features.py` |
 | Sampling | clean dataset | balanced sample by room segment | `src/data/sampling.py` |
-| EDA / Reports | clean dataset | figures and summaries | `src/data/make_cian_eda.py` |
+| EDA / Reports | geocoded dataset | figures (incl. distance plots and `spb_map_price_per_sqm`) and summaries | `src/data/make_cian_eda.py` |
 
 The full pipeline can be run with:
 
@@ -36,19 +37,20 @@ To collect a fresh snapshot first:
 python -m src.pipeline.run_data_pipeline --collect --pages 10 --timeout 20
 ```
 
-Current pipeline run:
+Current pipeline run (after the 2026-05-06 target switch and geocoding):
 
 | Artifact | Shape |
 |---|---:|
 | Normalized snapshot | 1359 rows x 24 columns |
-| Clean dataset | 1304 rows x 27 columns |
-| Offline feature table | 1304 rows x 39 columns |
-| District aggregate table | 22 rows x 6 columns |
-| District + rooms aggregate table | 93 rows x 7 columns |
+| Clean dataset (post broken-row filter) | 1300 rows x 27 columns |
+| Geocoded dataset | 1300 rows x 33 columns |
+| Offline feature table | 1300 rows x 47 columns |
+| District aggregate table | 18 rows x 6 columns |
+| District + rooms aggregate table | 89 rows x 7 columns |
 | Underground aggregate table | 73 rows x 6 columns |
 | Room segment aggregate table | 5 rows x 6 columns |
 | Rooms aggregate table | 5 rows x 6 columns |
-| Balanced sample | 1275 rows x 27 columns |
+| Balanced sample | ~1275 rows x 27 columns |
 
 ### Tooling Rationale
 
@@ -73,8 +75,13 @@ Current pipeline run:
 | `floor`, `floors_count` | CIAN listing | weekly / request | yes | yes |
 | `floor_ratio` | `floor / floors_count` | weekly / request | yes | yes |
 | `is_first_floor`, `is_last_floor` | derived | weekly / request | yes | yes |
-| `district` | CIAN listing | weekly / request | yes | yes |
+| `district` | CIAN listing (whitelisted) | weekly / request | yes | yes |
 | `underground` | CIAN listing | weekly / request | yes | yes |
+| `lat`, `lon` | geocoder (Nominatim) | weekly / request | yes | yes |
+| `geo_precision` | geocoder tier (`house` / `street` / `district`) | weekly / request | yes | yes |
+| `distance_to_center_km` | haversine to Дворцовая | weekly / request | yes | yes |
+| `distance_to_metro_km` | haversine to named station | weekly / request | yes | yes |
+| `metro_known` | flag | weekly / request | yes | yes |
 | `residential_complex` | CIAN listing | weekly / request | yes | cautiously |
 
 ### Market Aggregate Features

@@ -4,7 +4,7 @@ ML-система для оценки рыночной стоимости ква
 
 ## Описание
 
-Проект собирает актуальные объявления CIAN, валидирует Data Contract, очищает данные, строит EDA и baseline-оценки без ML. Kaggle-данные больше не используются.
+Проект собирает актуальные объявления CIAN, валидирует Data Contract, очищает данные (с фильтром broken-rows по 18 официальным районам СПб), геокодирует адрес каждого объявления через OpenStreetMap Nominatim, строит EDA и baseline-оценки без ML. Активный таргет — `target_price_per_sqm = price / total_meters`; цена восстанавливается умножением на `total_meters` для бизнес-метрик. Kaggle-данные не используются.
 
 ## Архитектура
 
@@ -42,6 +42,7 @@ python -m src.data.collect_cian_spb --pages 20 --timeout 20
 ```bash
 python -m src.data.clean_cian
 python -m src.data.contract_cian data/processed/cian_spb_clean.csv
+python -m src.features.geocoder
 python -m src.data.make_cian_eda
 python -m src.models.baseline_cian
 ```
@@ -52,16 +53,19 @@ python -m src.models.baseline_cian
 python -m src.pipeline.run_data_pipeline
 ```
 
-Сбор свежего snapshot + полный pipeline:
+Сбор свежего snapshot + полный pipeline (включая геокодинг):
 
 ```bash
 python -m src.pipeline.run_data_pipeline --collect --pages 10 --timeout 20
 ```
 
+Шаг геокодинга использует Nominatim (rate limit 1 req/s) и кэширует результаты в `data/cache/geocode_cache.json`, `data/reference/metro_spb_coords.json`, `data/reference/spb_district_centroids.json`. На свежем snapshot первый прогон занимает ~10-15 минут; последующие прогоны мгновенные за счёт кэша.
+
 Результаты:
 
 ```text
 data/processed/cian_spb_clean.csv
+data/processed/cian_spb_clean_geo.csv
 data/features/cian_spb_offline_features.csv
 data/features/cian_spb_*_market_aggregates.csv
 data/processed/cian_spb_balanced_sample.csv
@@ -75,6 +79,7 @@ docs/feature_registry.md
 docs/dfd_checkpoint2.md
 docs/ML_System_Design_Doc.md
 docs/architecture_cian.md
+docs/superpowers/specs/2026-05-06-target-switch-and-geo-design.md
 ```
 
 ## Структура проекта

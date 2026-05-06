@@ -8,9 +8,9 @@
 
 **Object:** apartment sale listing.
 
-**Target:** `price`, RUB.
+**Active target:** `target_price_per_sqm = price / total_meters`. Models train on `log_target_price_per_sqm = log1p(target_price_per_sqm)`. Price is reconstructed at inference as `expm1(prediction) × total_meters` for business metrics. This decision was taken in the 2026-05-06 design iteration (`docs/superpowers/specs/2026-05-06-target-switch-and-geo-design.md`) to avoid the situation where a model looks good purely because `total_meters` mechanically explains most of the variance in raw `price`.
 
-**User value:** estimate market price and compare a listing with similar apartments.
+**User value:** estimate market price per square meter and the reconstructed total price; compare a listing with similar apartments.
 
 **Core constraints:** fresh data, free project budget, response time under 500 ms for demo API, Saint Petersburg MVP, no personal contact data collection.
 
@@ -37,12 +37,20 @@ Current cleaned dataset:
 |---|---:|
 | Raw rows | 1400 |
 | Raw normalized rows | 1359 |
-| Clean rows | 1304 |
-| Removed rows | 55 |
-| Median price | 17,632,490 RUB |
-| Mean price | 36,390,040 RUB |
+| Clean rows (after range filters) | 1304 |
+| Clean rows (after broken-row filter, current snapshot) | 1300 |
+| Removed rows total | 100 |
+| Median price | 17,700,000 RUB |
+| Mean price | 36,466,864 RUB |
 | Median area | 58.0 m2 |
-| Median price per m2 | 338,593 RUB |
+| Median price per m2 | 339,430 RUB |
+| Median distance to center | 6.78 km |
+| Median distance to metro (when known) | 1.41 km |
+| Geocoded rows | 1300 / 1300 (100%) |
+| Geocoding precision: house | 1016 (78.2%) |
+| Geocoding precision: street | 118 (9.1%) |
+| Geocoding precision: district fallback | 166 (12.8%) |
+| Metro distance available | 1253 / 1300 (96.4%) |
 
 Room distribution after cleaning:
 
@@ -60,10 +68,15 @@ Generated figures:
 - `data/processed/figures/area_distribution.png`;
 - `data/processed/figures/price_vs_area.png`;
 - `data/processed/figures/rooms_distribution.png`;
+- `data/processed/figures/room_segment_distribution.png`;
 - `data/processed/figures/price_by_district_top15.png`;
 - `data/processed/figures/price_per_sqm_by_rooms.png`;
 - `data/processed/figures/missing_values.png`;
-- `data/processed/figures/correlation_matrix.png`.
+- `data/processed/figures/correlation_matrix.png`;
+- `data/processed/figures/distance_to_center_distribution.png`;
+- `data/processed/figures/distance_to_metro_distribution.png`;
+- `data/processed/figures/price_per_sqm_vs_distance.png`;
+- `data/processed/figures/spb_map_price_per_sqm.png`.
 
 Expected observations:
 - price distribution has a long right tail;
@@ -75,44 +88,51 @@ Expected observations:
 ## 4. Leakage Analysis
 
 Do not use as model features:
-- `price`;
-- `observed_price_per_sqm`;
-- `price_per_sqm_eda`;
-- `listing_id`;
-- `url`;
-- `collected_at`.
+- `price`, `log_price`;
+- `target_price_per_sqm`, `log_target_price_per_sqm` (the active target);
+- `observed_price_per_sqm`, `price_per_sqm_eda`;
+- `listing_id`, `url`, `source`, `collected_at`;
+- `street`, `house_number`: used **only** as input to the geocoder (Nominatim) at training and serving time. The model itself sees only their numeric derivatives (`lat`, `lon`, `distance_to_center_km`, `distance_to_metro_km`).
 
 Careful features:
-- `residential_complex`, `street`, `house_number`: possible memorization;
-- KNN comparable features: calculate using train data only.
+- `residential_complex`: high cardinality on a 1300-row dataset, excluded from the modeling feature set (memorization risk).
+- KNN comparable features and market-aggregate medians (`*_median_price_per_sqm`): calculate using the training split only when running modeling experiments.
 
 ## 5. Baseline
 
 Implemented in `src/models/baseline_cian.py`.
 
+All baselines now predict `target_price_per_sqm` directly and reconstruct `price = predicted_price_per_sqm × total_meters` for business metrics. Loss inside the baselines is implicit (medians are non-parametric); the metric set is below.
+
 Baselines:
-- B0 global median;
-- B1 median price per m2 by rooms multiplied by area;
-- B2 median price per m2 by district and rooms multiplied by area;
-- B3 comparable-listings KNN baseline.
+- B0 global median `price_per_sqm`;
+- B1 median `price_per_sqm` by rooms;
+- B2 median `price_per_sqm` by district and rooms;
+- B3 comparable-listings KNN: same district and rooms, nearest by area, median per_sqm.
 
 Metrics:
-- MAE;
-- RMSE;
-- MAPE;
-- MdAPE;
-- WAPE.
+- `MAE` (RUB), `MAPE` (%), `R²` on reconstructed `price` — comparable with business reporting;
+- `R²` on `price_per_sqm` — the *honest* metric: shows whether the baseline understands the local market beyond mechanical scaling by area.
 
-Current baseline results on an 80/20 reproducible split:
+Current baseline results on a reproducible 80/20 split (seed=42, snapshot 1300 rows):
 
-| Baseline | MAE, RUB | RMSE, RUB | MAPE | MdAPE | WAPE |
+| Baseline | MAE, RUB | MAPE | R² on price | R² on price_per_sqm |
+|---|---:|---:|---:|---:|
+| B0 global median price_per_sqm | 19,447,266 | 43.0% | 0.384 | -0.162 |
+| B1 by rooms_count | 18,870,219 | 44.0% | 0.448 | -0.122 |
+| B2 by district + rooms_count | 14,512,996 | 33.0% | 0.686 | 0.314 |
+| B3 KNN comparable on price_per_sqm | 14,618,127 | 34.1% | 0.681 | 0.301 |
+
+Conclusion. The original target (`price`) made B0 and B1 look stronger than they actually are: their `R² on price` was lifted by the dominance of `total_meters` in the price formula. The honest metric `R² on price_per_sqm` is **negative** for B0 and B1 — these baselines do not understand the market, only its area scaling. Only district-aware baselines (B2, B3) achieve a positive `R² ≈ 0.30` on the per-sqm target. This both validates the choice of target and sets a clear bar for the future ML model: improve `R² on price_per_sqm` over 0.31 using continuous geo features, market aggregates, and structured floor information.
+
+For comparison, the historical numbers on the original `price` target (ML System Design Doc as committed in checkpoint 1, before the broken-row filter and the target switch) — kept here for context only:
+
+| Baseline (old) | MAE | RMSE | MAPE | MdAPE | WAPE |
 |---|---:|---:|---:|---:|---:|
-| B0 global median price | 29,209,670 | 61,041,630 | 79.33% | 67.03% | 74.51% |
-| B1 median price/m2 by rooms * area | 19,393,620 | 42,701,920 | 47.86% | 42.39% | 49.47% |
-| B2 median price/m2 by district+rooms * area | 14,357,990 | 34,653,230 | 31.74% | 19.96% | 36.63% |
-| B3 comparable-listings KNN baseline | 13,856,320 | 30,604,180 | 32.31% | 20.32% | 35.35% |
-
-Conclusion: local market context matters. Moving from a global median to district/rooms and comparable-listing baselines substantially improves error, which supports the supervisor's suggestion to include neighborhood-level and KNN-style information.
+| B0 global median price | 29.2M | 61.0M | 79.3% | 67.0% | 74.5% |
+| B1 by rooms × area | 19.4M | 42.7M | 47.9% | 42.4% | 49.5% |
+| B2 by district + rooms × area | 14.4M | 34.7M | 31.7% | 20.0% | 36.6% |
+| B3 KNN comparable | 13.9M | 30.6M | 32.3% | 20.3% | 35.4% |
 
 ## 6. Architecture
 
@@ -139,8 +159,12 @@ Main risks:
 
 **Architecture:** replaced a linear pipeline with a complete ML system architecture including storage, validation, serving, monitoring, and retraining.
 
-**Loss/metrics:** separated future training loss on `log1p(price)` from business metrics such as MdAPE, MAPE, MAE, RMSE, WAPE.
+**Old data:** removed Kaggle dependency and switched to fresh CIAN snapshots collected by `cianparser`.
 
-**Old data:** removed Kaggle dependency and switched to fresh CIAN snapshots.
+**Loss/metrics:** training loss decoupled from business reporting. Models train on `log_target_price_per_sqm`. Business metrics are computed on reconstructed `price` (`MAE`, `MAPE`, `R²`). One additional honest metric — `R² on price_per_sqm` — exposes whether the baseline understands the local market or merely scales by `total_meters`. The 2026-05-06 baseline run shows that this honest metric is *negative* for global / rooms-only baselines (B0, B1) and only positive for district-aware baselines (B2, B3) — exactly the diagnostic the original supervisor feedback asked for.
 
-**Insufficient features:** added district, underground, residential complex, floor ratio, first/last floor flags, and comparable-listings baseline. Future checkpoints will add geocoding and distance-to-center features.
+**Insufficient features:** added district, underground, floor ratio, first/last floor flags, and the comparable-listings baseline in checkpoint 1. The 2026-05-06 iteration delivered the geocoding step that was promised here as future work: every listing now carries `lat`, `lon`, `geo_precision`, `distance_to_center_km`, `distance_to_metro_km`, `metro_known`. The geocoder uses Nominatim with a persistent cache and three precision tiers (house / street / district fallback).
+
+**Target rationale:** the active target is `target_price_per_sqm`, not raw `price`. This addresses the "не ясно, на каком признаке строится определение таргета" feedback: per-sqm normalization removes the dominant `total_meters` effect, so each remaining feature has a clear interpretable contribution. `street` and `house_number` participate only in the geocoder (lineage-only), never as model features — the model sees their numeric derivatives instead.
+
+**Broken parser rows:** the cleaning pipeline now enforces `district ∈ VALID_SPB_DISTRICTS` (the 18 official districts). Four broken rows where the parser placed listing titles into the district field are filtered out, so the geocoder is never called on garbage.

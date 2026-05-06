@@ -12,6 +12,29 @@ import pandas as pd
 RAW_PATTERN = "cian_spb_normalized_*.csv"
 DEFAULT_OUTPUT = Path("data/processed/cian_spb_clean.csv")
 
+VALID_SPB_DISTRICTS: frozenset[str] = frozenset(
+    {
+        "Адмиралтейский",
+        "Василеостровский",
+        "Выборгский",
+        "Калининский",
+        "Кировский",
+        "Колпинский",
+        "Красногвардейский",
+        "Красносельский",
+        "Кронштадтский",
+        "Курортный",
+        "Московский",
+        "Невский",
+        "Петроградский",
+        "Петродворцовый",
+        "Приморский",
+        "Пушкинский",
+        "Фрунзенский",
+        "Центральный",
+    }
+)
+
 
 def find_latest_input(input_path: str | None) -> Path:
     """Return explicit input path or latest normalized CIAN snapshot."""
@@ -76,6 +99,9 @@ def clean_cian_frame(df: pd.DataFrame) -> pd.DataFrame:
     for column in text_columns:
         if column in cleaned.columns:
             cleaned[column] = cleaned[column].fillna("unknown").astype(str).str.strip()
+
+    if "district" in cleaned.columns:
+        cleaned = cleaned[cleaned["district"].isin(VALID_SPB_DISTRICTS)]
 
     return cleaned.reset_index(drop=True)
 

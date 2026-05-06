@@ -6,7 +6,7 @@
 
 **Business goal:** help buyers, sellers, and analysts estimate whether a listing price is realistic for a given apartment segment and local market context.
 
-**ML task:** supervised regression. Target variable is `price` in RUB. Primary modeling target for future ML models is `log1p(price)` because real estate prices have a long right tail.
+**ML task:** supervised regression. The active target is `target_price_per_sqm = price / total_meters` and the modeling variable is `log_target_price_per_sqm = log1p(target_price_per_sqm)`. Per-sqm normalization removes the dominant `total_meters` regressor from the target so model improvements reflect understanding of the local market rather than mechanical scaling by area. The final price is reconstructed at inference as `expm1(prediction) × total_meters` for business metrics.
 
 **Object:** apartment listing from CIAN.
 
@@ -37,7 +37,7 @@
 
 **Current snapshot:** fresh listings collected on 2026-05-05 local time from CIAN pages available at collection time. This is not a publication-date guarantee; it is a collection timestamp.
 
-**Current cleaned sample:** 1304 listings after validation and cleaning from 1359 normalized rows and 1400 raw rows. Studio listings are preserved as `room_segment=studio` and `rooms_count=0`.
+**Current cleaned sample:** 1300 listings after validation, cleaning, and the broken-row filter (`district` must be in the official 18-district whitelist `VALID_SPB_DISTRICTS`). Source: 1400 raw rows → 1359 normalized → 1304 cleaned → 1300 after broken-row filter. Studio listings are preserved as `room_segment=studio` and `rooms_count=0`.
 
 **Raw storage:** `data/raw/cian_spb_raw_*.csv`.
 
@@ -54,47 +54,69 @@
 | `source` | yes | `cian` | 0% | source tracking |
 | `collected_at` | yes | timestamp | 0% | freshness control |
 | `location_query` | yes | `Санкт-Петербург` | 0% | MVP geography |
-| `price` | yes | 1M-600M RUB | 0% | target |
-| `total_meters` | yes | 10-500 m2 | 0% | core feature |
+| `price` | yes | 1M-600M RUB | 0% | reconstruction target only; not a model feature |
+| `target_price_per_sqm` | yes | 50k-3M RUB/m2 | 0% | active training target (`price / total_meters`) |
+| `log_target_price_per_sqm` | yes | finite log1p of target | 0% | training-loss target |
+| `total_meters` | yes | 10-500 m2 | 0% | core feature, also used to reconstruct price |
 | `rooms_count` | yes | 0-10 | 2% | studio encoded as 0 if parser returns it |
 | `floor` | no | 1-100 | 25% | optional |
 | `floors_count` | no | 1-100 | 25% | optional |
-| `district` | no | string | 35% | local market proxy |
-| `underground` | no | string | 45% | transport proxy |
+| `district` | yes | one of 18 SPB official districts | 0% (broken rows filtered) | local market segment, whitelist enforced |
+| `underground` | yes | metro station name or `unknown` | 0% literal; ~3.6% are `unknown` | transport proxy |
+| `lat` | yes | 59.5-60.3 | 0% (geocoder always falls back to district centroid) | geographic coordinate |
+| `lon` | yes | 29.4-30.9 | 0% | geographic coordinate |
+| `geo_precision` | yes | one of `house`/`street`/`district` | 0% | precision tier of the geocoded coordinate |
+| `distance_to_center_km` | yes | 0-50 km | 0% | haversine to Дворцовая (59.9386, 30.3141) |
+| `distance_to_metro_km` | no | 0-15 km | ~3.6% (when underground is `unknown`) | haversine to the named metro station |
+| `metro_known` | yes | bool | 0% | flag indicating whether `distance_to_metro_km` is meaningful |
 | `residential_complex` | no | string | 70% | useful but leakage/overfit risk |
 
 ## 5. Baselines And Metrics
 
 **Baseline solutions without ML:**
-- B0 global median price;
-- B1 median price per m2 by room count multiplied by area;
-- B2 median price per m2 by district and room count multiplied by area;
-- B3 comparable-listings KNN baseline: same district and room count, nearest areas, median price per m2.
+- B0 global median `price_per_sqm` × `total_meters`;
+- B1 median `price_per_sqm` by room count × `total_meters`;
+- B2 median `price_per_sqm` by district and room count × `total_meters`;
+- B3 comparable-listings KNN: same district and room count, nearest areas, median `price_per_sqm` × `total_meters`.
 
-Current best non-ML baselines are B2/B3 with MdAPE around 20% on a reproducible 80/20 split after preserving studios as a separate segment.
+All baselines now operate on the active per-sqm target. Final price is reconstructed and reported with the metric set below.
 
-**Training loss for future ML:** RMSE/MAE on `log1p(price)`.
+**Training loss for future ML:** MAE on `log_target_price_per_sqm`. Huber as a robust alternative.
 
-**Business metrics:**
-- `MdAPE`: main metric, robust percent error;
-- `MAPE`: average percent error;
+**Business metrics, reported on reconstructed `price`:**
 - `MAE`: error in RUB;
-- `RMSE`: sensitivity to expensive misses;
-- `WAPE`: portfolio-level percent error.
+- `MAPE`: mean percent error;
+- `R² on price`: coefficient of determination, comparable with checkpoint 1 numbers.
 
-This resolves the earlier ambiguity between optimization loss and business metrics.
+**Honest metric, reported on `target_price_per_sqm`:**
+- `R² on price_per_sqm`: shows whether the model understands the local market beyond mechanical scaling by area. A model with high `R² on price` but low `R² on price_per_sqm` is mostly riding on `total_meters`.
+
+**Current baseline numbers** (reproducible 80/20 split, seed=42, snapshot 1300 rows after broken-row filter):
+
+| Baseline | MAE, RUB | MAPE | R² on price | R² on price_per_sqm |
+|---|---:|---:|---:|---:|
+| B0 global median price_per_sqm | 19,447,266 | 43.0% | 0.384 | -0.162 |
+| B1 by rooms_count | 18,870,219 | 44.0% | 0.448 | -0.122 |
+| B2 by district + rooms_count | 14,512,996 | 33.0% | 0.686 | 0.314 |
+| B3 KNN comparable on price_per_sqm | 14,618,127 | 34.1% | 0.681 | 0.301 |
+
+Reading the table: B0 and B1 have an apparently decent `R² on price`, but their `R² on price_per_sqm` is **negative** — the global / by-rooms median is worse than the test-set per-sqm mean. Only district-aware baselines (B2, B3) show meaningful market understanding. This is exactly why we switched the target.
 
 ## 6. Leakage Analysis
 
 Fields not allowed as model features:
-- `price`;
-- `observed_price_per_sqm` and `price_per_sqm_eda`, because they are computed from the target;
-- `listing_id`, `url`, `collected_at`;
-- direct identifiers that allow memorization.
+- `price`, `log_price` — original raw target;
+- `target_price_per_sqm`, `log_target_price_per_sqm` — active target;
+- `observed_price_per_sqm`, `price_per_sqm_eda` — computed from target;
+- `listing_id`, `url`, `collected_at`, `source` — metadata;
+- `street`, `house_number` — used **only** for the geocoder. They feed the
+  Nominatim query at training time and the API request at serving time;
+  they never enter the model. The model sees only their numeric derivatives
+  (`lat`, `lon`, `distance_to_center_km`, `distance_to_metro_km`).
 
 High-risk features:
-- `residential_complex`, `street`, `house_number`: can improve quality, but may cause memorization on small data;
-- KNN comparable features: must be calculated using train data only, not the full dataset.
+- `residential_complex`: can improve quality, but may cause memorization on small data; excluded from the modeling feature set.
+- KNN comparable features and market-aggregate medians (`*_median_price_per_sqm`): must be calculated using the training split only when running modeling experiments.
 
 ## 7. Architecture
 
