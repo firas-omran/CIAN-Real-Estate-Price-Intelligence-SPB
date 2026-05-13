@@ -1,0 +1,288 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  id="Definitions_cian_pipeline"
+                  targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:process id="Process_cian_pipeline" isExecutable="false">
+
+    <!-- ===== Start: Weekly Timer ===== -->
+    <bpmn:startEvent id="Start_WeeklyTimer" name="Еженедельный запуск">
+      <bpmn:timerEventDefinition>
+        <bpmn:timeCycle xsi:type="bpmn:tFormalExpression">R/P7D</bpmn:timeCycle>
+      </bpmn:timerEventDefinition>
+    </bpmn:startEvent>
+
+    <!-- ===== Lane 1: Сбор и очистка данных ===== -->
+    <bpmn:task id="Task_Collect" name="Сбор объявлений CIAN&#10;cianparser, 5 сегментов комнатности" />
+    <bpmn:task id="Task_Normalize" name="Нормализация схемы&#10;24 колонки, дедупликация" />
+    <bpmn:task id="Task_Validate" name="Валидация Data Contract&#10;Great Expectations" />
+    <bpmn:exclusiveGateway id="Gateway_Contract" name="Контракт&#10;пройден?" />
+    <bpmn:task id="Task_Clean" name="Очистка данных&#10;Whitelist 18 районов СПб, outlier-фильтры" />
+    <bpmn:task id="Task_FixContract" name="Исправление нарушений&#10;контракта" />
+
+    <!-- ===== Lane 2: Геокодинг и признаки ===== -->
+    <bpmn:task id="Task_Geocode" name="Геокодинг адресов&#10;Nominatim 3-tier: house/street/district&#10;+ JSON-кэш" />
+    <bpmn:task id="Task_GeoFeatures" name="Расчёт гео-признаков&#10;distance_to_center_km&#10;distance_to_metro_km" />
+    <bpmn:task id="Task_BuildFeatures" name="Сборка offline-фичей&#10;18 признаков, target_price_per_sqm&#10;log_target_price_per_sqm" />
+    <bpmn:task id="Task_Aggregates" name="Market aggregates&#10;Медианы по district/rooms/metro&#10;5 lookup-таблиц" />
+
+    <!-- ===== Lane 3: Обучение ===== -->
+    <bpmn:task id="Task_Split" name="Train/val/test split&#10;60/20/20, stratify по rooms_count" />
+    <bpmn:task id="Task_Ridge" name="Ridge baseline&#10;StandardScaler + OneHotEncoder" />
+    <bpmn:task id="Task_CatBoost" name="Обучение CatBoost&#10;5-fold CV, early stopping" />
+    <bpmn:exclusiveGateway id="Gateway_ModelOK" name="R² &gt; 0.31&#10;(выше B2)?" />
+    <bpmn:task id="Task_SaveModel" name="Сохранение модели&#10;catboost_price_per_sqm.cbm" />
+    <bpmn:task id="Task_TuneHyper" name="Подбор гиперпараметров" />
+    <bpmn:task id="Task_Sampling" name="Семплирование&#10;Stratified по rooms_count&#10;1275 строк" />
+
+    <!-- ===== End ===== -->
+    <bpmn:endEvent id="End_PipelineDone" name="Пайплайн завершён" />
+
+    <!-- ===== Data Objects ===== -->
+    <bpmn:dataObjectReference id="DO_RawCSV" dataObjectRef="Data_RawCSV" />
+    <bpmn:dataObjectReference id="DO_NormCSV" dataObjectRef="Data_NormCSV" />
+    <bpmn:dataObjectReference id="DO_CleanCSV" dataObjectRef="Data_CleanCSV" />
+    <bpmn:dataObjectReference id="DO_GeoCSV" dataObjectRef="Data_GeoCSV" />
+    <bpmn:dataObjectReference id="DO_FeaturesCSV" dataObjectRef="Data_FeaturesCSV" />
+    <bpmn:dataObjectReference id="DO_AggCSV" dataObjectRef="Data_AggCSV" />
+    <bpmn:dataObjectReference id="DO_Model" dataObjectRef="Data_Model" />
+    <bpmn:dataObjectReference id="DO_BalancedCSV" dataObjectRef="Data_BalancedCSV" />
+
+    <!-- ===== Sequence Flows ===== -->
+    <bpmn:sequenceFlow id="Flow_Start_Collect" sourceRef="Start_WeeklyTimer" targetRef="Task_Collect" />
+    <bpmn:sequenceFlow id="Flow_Collect_Normalize" sourceRef="Task_Collect" targetRef="Task_Normalize" />
+    <bpmn:sequenceFlow id="Flow_Normalize_Validate" sourceRef="Task_Normalize" targetRef="Task_Validate" />
+    <bpmn:sequenceFlow id="Flow_Validate_Gateway" sourceRef="Task_Validate" targetRef="Gateway_Contract" />
+    <bpmn:sequenceFlow id="Flow_Gateway_Clean" sourceRef="Gateway_Contract" targetRef="Task_Clean">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">passed</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_Gateway_Fix" sourceRef="Gateway_Contract" targetRef="Task_FixContract">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">failed</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_Fix_Validate" sourceRef="Task_FixContract" targetRef="Task_Validate" />
+    <bpmn:sequenceFlow id="Flow_Clean_Geocode" sourceRef="Task_Clean" targetRef="Task_Geocode" />
+    <bpmn:sequenceFlow id="Flow_Geocode_GeoFeat" sourceRef="Task_Geocode" targetRef="Task_GeoFeatures" />
+    <bpmn:sequenceFlow id="Flow_GeoFeat_BuildFeat" sourceRef="Task_GeoFeatures" targetRef="Task_BuildFeatures" />
+    <bpmn:sequenceFlow id="Flow_BuildFeat_Agg" sourceRef="Task_BuildFeatures" targetRef="Task_Aggregates" />
+    <bpmn:sequenceFlow id="Flow_Agg_Split" sourceRef="Task_Aggregates" targetRef="Task_Split" />
+    <bpmn:sequenceFlow id="Flow_Clean_Sampling" sourceRef="Task_Clean" targetRef="Task_Sampling" />
+    <bpmn:sequenceFlow id="Flow_Split_Ridge" sourceRef="Task_Split" targetRef="Task_Ridge" />
+    <bpmn:sequenceFlow id="Flow_Ridge_CatBoost" sourceRef="Task_Ridge" targetRef="Task_CatBoost" />
+    <bpmn:sequenceFlow id="Flow_CatBoost_Gateway" sourceRef="Task_CatBoost" targetRef="Gateway_ModelOK" />
+    <bpmn:sequenceFlow id="Flow_Gateway_Save" sourceRef="Gateway_ModelOK" targetRef="Task_SaveModel">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">yes</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_Gateway_Tune" sourceRef="Gateway_ModelOK" targetRef="Task_TuneHyper">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">no</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_Tune_CatBoost" sourceRef="Task_TuneHyper" targetRef="Task_CatBoost" />
+    <bpmn:sequenceFlow id="Flow_Save_End" sourceRef="Task_SaveModel" targetRef="End_PipelineDone" />
+
+    <!-- ===== Data Associations ===== -->
+    <bpmn:dataOutputAssociation id="Assoc_Collect_Out" sourceRef="Task_Collect" targetRef="DO_RawCSV" />
+    <bpmn:dataOutputAssociation id="Assoc_Norm_Out" sourceRef="Task_Normalize" targetRef="DO_NormCSV" />
+    <bpmn:dataOutputAssociation id="Assoc_Clean_Out" sourceRef="Task_Clean" targetRef="DO_CleanCSV" />
+    <bpmn:dataOutputAssociation id="Assoc_Geo_Out" sourceRef="Task_GeoFeatures" targetRef="DO_GeoCSV" />
+    <bpmn:dataOutputAssociation id="Assoc_Feat_Out" sourceRef="Task_BuildFeatures" targetRef="DO_FeaturesCSV" />
+    <bpmn:dataOutputAssociation id="Assoc_Agg_Out" sourceRef="Task_Aggregates" targetRef="DO_AggCSV" />
+    <bpmn:dataOutputAssociation id="Assoc_Model_Out" sourceRef="Task_SaveModel" targetRef="DO_Model" />
+    <bpmn:dataOutputAssociation id="Assoc_Sampling_Out" sourceRef="Task_Sampling" targetRef="DO_BalancedCSV" />
+
+  </bpmn:process>
+
+  <!-- ===== Data Objects (definitions) ===== -->
+  <bpmn:dataObject id="Data_RawCSV" name="cian_spb_raw.csv" />
+  <bpmn:dataObject id="Data_NormCSV" name="cian_spb_normalized.csv" />
+  <bpmn:dataObject id="Data_CleanCSV" name="cian_spb_clean.csv (1300 rows)" />
+  <bpmn:dataObject id="Data_GeoCSV" name="cian_spb_clean_geo.csv (+6 geo columns)" />
+  <bpmn:dataObject id="Data_FeaturesCSV" name="offline_features.csv (18 features)" />
+  <bpmn:dataObject id="Data_AggCSV" name="*_market_aggregates.csv (5 tables)" />
+  <bpmn:dataObject id="Data_Model" name="catboost_price_per_sqm.cbm" />
+  <bpmn:dataObject id="Data_BalancedCSV" name="balanced_sample.csv (1275 rows)" />
+
+  <!-- ===== Diagram Interchange ===== -->
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="Process_cian_pipeline">
+      <!-- Start Event -->
+      <bpmndi:BPMNShape id="Shape_Start" bpmnElement="Start_WeeklyTimer">
+        <dc:Bounds x="80" y="80" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <!-- Lane 1: Data Collection & Cleaning (top lane) -->
+      <bpmndi:BPMNShape id="Shape_Collect" bpmnElement="Task_Collect">
+        <dc:Bounds x="180" y="60" width="140" height="70" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Normalize" bpmnElement="Task_Normalize">
+        <dc:Bounds x="380" y="60" width="140" height="70" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Validate" bpmnElement="Task_Validate">
+        <dc:Bounds x="580" y="60" width="140" height="70" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_GatewayContract" bpmnElement="Gateway_Contract">
+        <dc:Bounds x="775" y="75" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Clean" bpmnElement="Task_Clean">
+        <dc:Bounds x="890" y="60" width="140" height="70" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Fix" bpmnElement="Task_FixContract">
+        <dc:Bounds x="780" y="220" width="140" height="60" />
+      </bpmndi:BPMNShape>
+      <!-- Lane 2: Geocoding & Features -->
+      <bpmndi:BPMNShape id="Shape_Geocode" bpmnElement="Task_Geocode">
+        <dc:Bounds x="180" y="200" width="140" height="70" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_GeoFeat" bpmnElement="Task_GeoFeatures">
+        <dc:Bounds x="380" y="200" width="140" height="70" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_BuildFeat" bpmnElement="Task_BuildFeatures">
+        <dc:Bounds x="580" y="200" width="140" height="70" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Agg" bpmnElement="Task_Aggregates">
+        <dc:Bounds x="780" y="200" width="140" height="70" />
+      </bpmndi:BPMNShape>
+      <!-- Lane 3: Training -->
+      <bpmndi:BPMNShape id="Shape_Split" bpmnElement="Task_Split">
+        <dc:Bounds x="180" y="340" width="140" height="70" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Ridge" bpmnElement="Task_Ridge">
+        <dc:Bounds x="380" y="340" width="140" height="70" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_CatBoost" bpmnElement="Task_CatBoost">
+        <dc:Bounds x="580" y="340" width="140" height="70" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_GatewayModelOK" bpmnElement="Gateway_ModelOK">
+        <dc:Bounds x="775" y="350" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_SaveModel" bpmnElement="Task_SaveModel">
+        <dc:Bounds x="890" y="340" width="140" height="70" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Tune" bpmnElement="Task_TuneHyper">
+        <dc:Bounds x="780" y="460" width="140" height="60" />
+      </bpmndi:BPMNShape>
+      <!-- Lane 4: Sampling (parallel branch) -->
+      <bpmndi:BPMNShape id="Shape_Sampling" bpmnElement="Task_Sampling">
+        <dc:Bounds x="180" y="480" width="140" height="70" />
+      </bpmndi:BPMNShape>
+      <!-- End Event -->
+      <bpmndi:BPMNShape id="Shape_End" bpmnElement="End_PipelineDone">
+        <dc:Bounds x="1100" y="357" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <!-- Data Objects -->
+      <bpmndi:BPMNShape id="Shape_DO_Raw" bpmnElement="DO_RawCSV">
+        <dc:Bounds x="210" y="-30" width="40" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_DO_Norm" bpmnElement="DO_NormCSV">
+        <dc:Bounds x="410" y="-30" width="40" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_DO_Clean" bpmnElement="DO_CleanCSV">
+        <dc:Bounds x="920" y="-30" width="40" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_DO_Geo" bpmnElement="DO_GeoCSV">
+        <dc:Bounds x="410" y="280" width="40" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_DO_Features" bpmnElement="DO_FeaturesCSV">
+        <dc:Bounds x="610" y="280" width="40" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_DO_Agg" bpmnElement="DO_AggCSV">
+        <dc:Bounds x="810" y="280" width="40" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_DO_Model" bpmnElement="DO_Model">
+        <dc:Bounds x="920" y="420" width="40" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_DO_Balanced" bpmnElement="DO_BalancedCSV">
+        <dc:Bounds x="210" y="560" width="40" height="50" />
+      </bpmndi:BPMNShape>
+      <!-- Flows -->
+      <bpmndi:BPMNEdge id="Edge_Start_Collect" bpmnElement="Flow_Start_Collect">
+        <di:waypoint x="116" y="98" />
+        <di:waypoint x="180" y="95" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Collect_Normalize" bpmnElement="Flow_Collect_Normalize">
+        <di:waypoint x="320" y="95" />
+        <di:waypoint x="380" y="95" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Normalize_Validate" bpmnElement="Flow_Normalize_Validate">
+        <di:waypoint x="520" y="95" />
+        <di:waypoint x="580" y="95" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Validate_Gateway" bpmnElement="Flow_Validate_Gateway">
+        <di:waypoint x="720" y="95" />
+        <di:waypoint x="775" y="100" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Gateway_Clean" bpmnElement="Flow_Gateway_Clean">
+        <di:waypoint x="825" y="100" />
+        <di:waypoint x="890" y="95" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Gateway_Fix" bpmnElement="Flow_Gateway_Fix">
+        <di:waypoint x="800" y="125" />
+        <di:waypoint x="800" y="220" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Fix_Validate" bpmnElement="Flow_Fix_Validate">
+        <di:waypoint x="780" y="250" />
+        <di:waypoint x="650" y="250" />
+        <di:waypoint x="650" y="130" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Clean_Geocode" bpmnElement="Flow_Clean_Geocode">
+        <di:waypoint x="960" y="130" />
+        <di:waypoint x="960" y="165" />
+        <di:waypoint x="250" y="165" />
+        <di:waypoint x="250" y="200" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Geocode_GeoFeat" bpmnElement="Flow_Geocode_GeoFeat">
+        <di:waypoint x="320" y="235" />
+        <di:waypoint x="380" y="235" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_GeoFeat_BuildFeat" bpmnElement="Flow_GeoFeat_BuildFeat">
+        <di:waypoint x="520" y="235" />
+        <di:waypoint x="580" y="235" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_BuildFeat_Agg" bpmnElement="Flow_BuildFeat_Agg">
+        <di:waypoint x="720" y="235" />
+        <di:waypoint x="780" y="235" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Agg_Split" bpmnElement="Flow_Agg_Split">
+        <di:waypoint x="850" y="270" />
+        <di:waypoint x="850" y="305" />
+        <di:waypoint x="250" y="305" />
+        <di:waypoint x="250" y="340" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Clean_Sampling" bpmnElement="Flow_Clean_Sampling">
+        <di:waypoint x="960" y="95" />
+        <di:waypoint x="1100" y="95" />
+        <di:waypoint x="1100" y="515" />
+        <di:waypoint x="320" y="515" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Split_Ridge" bpmnElement="Flow_Split_Ridge">
+        <di:waypoint x="320" y="375" />
+        <di:waypoint x="380" y="375" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Ridge_CatBoost" bpmnElement="Flow_Ridge_CatBoost">
+        <di:waypoint x="520" y="375" />
+        <di:waypoint x="580" y="375" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_CatBoost_Gateway" bpmnElement="Flow_CatBoost_Gateway">
+        <di:waypoint x="720" y="375" />
+        <di:waypoint x="775" y="375" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Gateway_Save" bpmnElement="Flow_Gateway_Save">
+        <di:waypoint x="825" y="375" />
+        <di:waypoint x="890" y="375" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Gateway_Tune" bpmnElement="Flow_Gateway_Tune">
+        <di:waypoint x="800" y="400" />
+        <di:waypoint x="800" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Tune_CatBoost" bpmnElement="Flow_Tune_CatBoost">
+        <di:waypoint x="780" y="490" />
+        <di:waypoint x="650" y="490" />
+        <di:waypoint x="650" y="410" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Save_End" bpmnElement="Flow_Save_End">
+        <di:waypoint x="1030" y="375" />
+        <di:waypoint x="1100" y="375" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

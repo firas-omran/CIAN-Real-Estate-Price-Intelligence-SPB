@@ -1,6 +1,10 @@
-# CIAN Price Intelligence — Architecture Diagram
+# CIAN Price Intelligence — Architecture
 
-Main architecture document is at [docs/architecture_bpmn.md](architecture_bpmn.md).
+## BPMN-диаграмма (основная)
+
+**BPMN 2.0 XML:** [docs/diagrams/cian_data_pipeline.bpmn](diagrams/cian_data_pipeline.bpmn) — открыть в [demo.bpmn.io](https://demo.bpmn.io/)
+
+Полное описание BPMN-процесса (пулы, дорожки, задачи, шлюзы, объекты данных): [docs/architecture_bpmn.md](architecture_bpmn.md).
 
 ## System Architecture Overview
 
