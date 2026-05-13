@@ -1,8 +1,11 @@
 """Non-ML baselines for CIAN apartment price estimation on the price_per_sqm target.
 
-Each baseline B0..B3 predicts price per square meter directly. The final
+Each baseline B0..B5 predicts price per square meter directly. The final
 price prediction is reconstructed as `price_per_sqm_pred * total_meters` so
 business metrics stay comparable with the original ML System Design Doc.
+
+B0-B3 are non-spatial baselines on price_per_sqm.
+B4-B5 incorporate continuous geo features (distance to center / metro).
 
 Reported metrics:
     * MAE  — mean absolute error of reconstructed price, RUB
@@ -24,6 +27,12 @@ import pandas as pd
 
 
 PER_SQM_COLUMN = "price_per_sqm"
+
+CENTER_BINS = [0, 3, 6, 10, 15, float("inf")]
+CENTER_LABELS = ["0-3km", "3-6km", "6-10km", "10-15km", "15km+"]
+
+METRO_BINS = [0, 0.5, 1, 2, 5, float("inf")]
+METRO_LABELS = ["0-0.5km", "0.5-1km", "1-2km", "2-5km", "5km+"]
 
 
 @dataclass
@@ -120,8 +129,63 @@ def predict_comparable_knn_per_sqm(train: pd.DataFrame, test: pd.DataFrame, k: i
     return pd.Series(predictions, index=test.index)
 
 
+def _assign_center_bin(df: pd.DataFrame) -> pd.Series:
+    return pd.cut(df["distance_to_center_km"], bins=CENTER_BINS, labels=CENTER_LABELS, right=False)
+
+
+def _assign_metro_bin(df: pd.DataFrame) -> pd.Series:
+    metro_bin = pd.cut(df["distance_to_metro_km"], bins=METRO_BINS, labels=METRO_LABELS, right=False)
+    metro_bin = metro_bin.astype(object)
+    metro_bin[~df["metro_known"].astype(bool)] = "unknown"
+    return metro_bin
+
+
+def predict_center_bins_per_sqm(train: pd.DataFrame, test: pd.DataFrame) -> pd.Series:
+    """B4: median price_per_sqm by (center_distance_bin, rooms_count)."""
+    train = train.copy()
+    train["center_bin"] = _assign_center_bin(train)
+    global_ppm = train[PER_SQM_COLUMN].median()
+    rooms_ppm = train.groupby("rooms_count")[PER_SQM_COLUMN].median()
+    bin_rooms = train.groupby(["center_bin", "rooms_count"], observed=False)[PER_SQM_COLUMN].median()
+
+    test = test.copy()
+    test["center_bin"] = _assign_center_bin(test)
+
+    predictions = []
+    for _, row in test.iterrows():
+        key = (row["center_bin"], row["rooms_count"])
+        if key in bin_rooms.index:
+            predictions.append(bin_rooms.loc[key])
+        else:
+            predictions.append(rooms_ppm.get(row["rooms_count"], global_ppm))
+
+    return pd.Series(predictions, index=test.index)
+
+
+def predict_metro_bins_per_sqm(train: pd.DataFrame, test: pd.DataFrame) -> pd.Series:
+    """B5: median price_per_sqm by (metro_distance_bin, rooms_count)."""
+    train = train.copy()
+    train["metro_bin"] = _assign_metro_bin(train)
+    global_ppm = train[PER_SQM_COLUMN].median()
+    rooms_ppm = train.groupby("rooms_count")[PER_SQM_COLUMN].median()
+    bin_rooms = train.groupby(["metro_bin", "rooms_count"], observed=False)[PER_SQM_COLUMN].median()
+
+    test = test.copy()
+    test["metro_bin"] = _assign_metro_bin(test)
+
+    predictions = []
+    for _, row in test.iterrows():
+        key = (row["metro_bin"], row["rooms_count"])
+        if key in bin_rooms.index:
+            predictions.append(bin_rooms.loc[key])
+        else:
+            predictions.append(rooms_ppm.get(row["rooms_count"], global_ppm))
+
+    return pd.Series(predictions, index=test.index)
+
+
 def evaluate_baselines(df: pd.DataFrame) -> pd.DataFrame:
-    """Evaluate B0..B3 on price_per_sqm and report metrics on reconstructed price."""
+    """Evaluate B0..B5 on price_per_sqm and report metrics on reconstructed price."""
     df = df.copy()
     df[PER_SQM_COLUMN] = df["price"] / df["total_meters"]
 
@@ -138,6 +202,8 @@ def evaluate_baselines(df: pd.DataFrame) -> pd.DataFrame:
         ("B1 median price_per_sqm by rooms", predict_rooms_per_sqm),
         ("B2 median price_per_sqm by district + rooms", predict_district_rooms_per_sqm),
         ("B3 comparable listings KNN on price_per_sqm", predict_comparable_knn_per_sqm),
+        ("B4 median price_per_sqm by center_distance_bin + rooms", predict_center_bins_per_sqm),
+        ("B5 median price_per_sqm by metro_distance_bin + rooms", predict_metro_bins_per_sqm),
     ]
 
     results = []
@@ -152,7 +218,7 @@ def evaluate_baselines(df: pd.DataFrame) -> pd.DataFrame:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate CIAN non-ML baselines on price_per_sqm target.")
-    parser.add_argument("--input", default="data/processed/cian_spb_clean.csv")
+    parser.add_argument("--input", default="data/processed/cian_spb_clean_geo.csv")
     parser.add_argument("--output", type=Path, default=Path("data/processed/baseline_metrics.csv"))
     args = parser.parse_args()
 

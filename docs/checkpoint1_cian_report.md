@@ -108,13 +108,15 @@ Baselines:
 - B0 global median `price_per_sqm`;
 - B1 median `price_per_sqm` by rooms;
 - B2 median `price_per_sqm` by district and rooms;
-- B3 comparable-listings KNN: same district and rooms, nearest by area, median per_sqm.
+- B3 comparable-listings KNN: same district and rooms, nearest by area, median per_sqm;
+- B4 median `price_per_sqm` by center distance bucket and rooms;
+- B5 median `price_per_sqm` by metro distance bucket and rooms.
 
 Metrics:
 - `MAE` (RUB), `MAPE` (%), `R²` on reconstructed `price` — comparable with business reporting;
 - `R²` on `price_per_sqm` — the *honest* metric: shows whether the baseline understands the local market beyond mechanical scaling by area.
 
-Current baseline results on a reproducible 80/20 split (seed=42, snapshot 1300 rows):
+Current baseline results on a reproducible 80/20 split (seed=42, snapshot 1300 rows, geo-enriched):
 
 | Baseline | MAE, RUB | MAPE | R² on price | R² on price_per_sqm |
 |---|---:|---:|---:|---:|
@@ -122,8 +124,12 @@ Current baseline results on a reproducible 80/20 split (seed=42, snapshot 1300 r
 | B1 by rooms_count | 18,870,219 | 44.0% | 0.448 | -0.122 |
 | B2 by district + rooms_count | 14,512,996 | 33.0% | 0.686 | 0.314 |
 | B3 KNN comparable on price_per_sqm | 14,618,127 | 34.1% | 0.681 | 0.301 |
+| B4 by center_distance_bin + rooms_count | 16,654,207 | 37.4% | 0.577 | 0.101 |
+| B5 by metro_distance_bin + rooms_count | 19,117,685 | 44.8% | 0.425 | -0.140 |
 
-Conclusion. The original target (`price`) made B0 and B1 look stronger than they actually are: their `R² on price` was lifted by the dominance of `total_meters` in the price formula. The honest metric `R² on price_per_sqm` is **negative** for B0 and B1 — these baselines do not understand the market, only its area scaling. Only district-aware baselines (B2, B3) achieve a positive `R² ≈ 0.30` on the per-sqm target. This both validates the choice of target and sets a clear bar for the future ML model: improve `R² on price_per_sqm` over 0.31 using continuous geo features, market aggregates, and structured floor information.
+Conclusion. The original target (`price`) made B0 and B1 look stronger than they actually are: their `R² on price` was lifted by the dominance of `total_meters` in the price formula. The honest metric `R² on price_per_sqm` is **negative** for B0 and B1 — these baselines do not understand the market, only its area scaling. Only district-aware baselines (B2, B3) achieve a positive `R² ≈ 0.30` on the per-sqm target. B4 (center distance bins) gives R² = +0.10 — confirming continuous geo signal exists. B5 (metro bins alone) is negative — metro distance needs district context.
+
+ML models (Checkpoint 2/3 boundary): Ridge achieves R² = 0.63 on per_sqm, CatBoost achieves **R² = 0.71** — 2.3× improvement over the best non-ML baseline B2 (0.31). Top features: district (24.7%), author_type (13.7%), distance_to_center_km (7.1%), floors_count (6.5%), total_meters (6.1%).
 
 For comparison, the historical numbers on the original `price` target (ML System Design Doc as committed in checkpoint 1, before the broken-row filter and the target switch) — kept here for context only:
 

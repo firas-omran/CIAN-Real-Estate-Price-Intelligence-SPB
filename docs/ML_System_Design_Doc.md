@@ -91,7 +91,7 @@ All baselines now operate on the active per-sqm target. Final price is reconstru
 **Honest metric, reported on `target_price_per_sqm`:**
 - `R² on price_per_sqm`: shows whether the model understands the local market beyond mechanical scaling by area. A model with high `R² on price` but low `R² on price_per_sqm` is mostly riding on `total_meters`.
 
-**Current baseline numbers** (reproducible 80/20 split, seed=42, snapshot 1300 rows after broken-row filter):
+**Current baseline numbers** (reproducible 80/20 split, seed=42, snapshot 1300 rows, geo-enriched):
 
 | Baseline | MAE, RUB | MAPE | R² on price | R² on price_per_sqm |
 |---|---:|---:|---:|---:|
@@ -99,8 +99,20 @@ All baselines now operate on the active per-sqm target. Final price is reconstru
 | B1 by rooms_count | 18,870,219 | 44.0% | 0.448 | -0.122 |
 | B2 by district + rooms_count | 14,512,996 | 33.0% | 0.686 | 0.314 |
 | B3 KNN comparable on price_per_sqm | 14,618,127 | 34.1% | 0.681 | 0.301 |
+| B4 by center_distance_bin + rooms_count | 16,654,207 | 37.4% | 0.577 | 0.101 |
+| B5 by metro_distance_bin + rooms_count | 19,117,685 | 44.8% | 0.425 | -0.140 |
 
-Reading the table: B0 and B1 have an apparently decent `R² on price`, but their `R² on price_per_sqm` is **negative** — the global / by-rooms median is worse than the test-set per-sqm mean. Only district-aware baselines (B2, B3) show meaningful market understanding. This is exactly why we switched the target.
+B4 (5 center-distance buckets: 0-3, 3-6, 6-10, 10-15, 15+ km) gives positive R^2 on per_sqm — confirming geo signal exists. B5 (5 metro-distance buckets) is weak on its own — metro proximity matters, but without district context it's insufficient.
+
+**ML model results** (60/20/20 split, seed=42, 18 features, no aggregates/leakage):
+
+| Model | R^2 on per_sqm | MAE (RUB/m^2) | MAPE |
+|---|---:|---:|---:|
+| B2 baseline (non-ML) | 0.31 | — | — |
+| Ridge (linear) | 0.63 | 96,864 | 21.8% |
+| **CatBoost** | **0.71** | **82,809** | **18.6%** |
+
+CatBoost improves R^2 on per_sqm by 2.3× over the best non-ML baseline. Top features: district (24.7%), author_type (13.7%), distance_to_center_km (7.1%), floors_count (6.5%), total_meters (6.1%). Geo features (center distance + metro distance + lat + lon) collectively account for ~22% of feature importance — confirming the value of continuous spatial signal beyond categorical district.
 
 ## 6. Leakage Analysis
 

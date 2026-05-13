@@ -29,6 +29,7 @@ Thumbs.db
 *.joblib
 *.pkl
 *.pickle
+catboost_info/
 
 # Environment
 .env
