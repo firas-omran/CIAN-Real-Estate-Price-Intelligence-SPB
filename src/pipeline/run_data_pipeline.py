@@ -38,6 +38,7 @@ def main() -> None:
 
     run_step([python, "-m", "src.data.clean_cian"])
     run_step([python, "-m", "src.data.contract_cian", "data/processed/cian_spb_clean.csv"])
+    run_step([python, "-m", "src.features.geocoder"])
     run_step([python, "-m", "src.features.build_features"])
     run_step([python, "-m", "src.data.sampling"])
 
@@ -51,6 +52,7 @@ def main() -> None:
     print("Main artifacts:")
     for path in [
         "data/processed/cian_spb_clean.csv",
+        "data/processed/cian_spb_clean_geo.csv",
         "data/features/cian_spb_offline_features.csv",
         "data/processed/cian_spb_balanced_sample.csv",
         "data/processed/sampling_report.md",

@@ -33,9 +33,27 @@ CIAN_DATA_CONTRACT = {
     "rooms_count": {"required": True, "min": 0, "max": 10, "max_null_pct": 0.02},
     "floor": {"required": False, "min": 1, "max": 100, "max_null_pct": 0.25},
     "floors_count": {"required": False, "min": 1, "max": 100, "max_null_pct": 0.25},
-    "district": {"required": False, "max_null_pct": 0.35},
-    "underground": {"required": False, "max_null_pct": 0.45},
+    # district enforces VALID_SPB_DISTRICTS via clean_cian.py; observed 0% null after broken-row filter.
+    "district": {"required": True, "max_null_pct": 0.01},
+    # underground is always present as a literal string; ~3.6% rows carry the placeholder "unknown".
+    "underground": {"required": True, "max_null_pct": 0.05},
     "residential_complex": {"required": False, "max_null_pct": 0.70},
+    # Geocoding-derived features (added in geocoded dataset; optional in contract for raw clean.csv).
+    "lat": {"required": False, "min": 59.5, "max": 60.3, "max_null_pct": 0.0},
+    "lon": {"required": False, "min": 29.4, "max": 30.9, "max_null_pct": 0.0},
+    "geo_precision": {
+        "required": False,
+        "allowed_values": ["house", "street", "district"],
+        "max_null_pct": 0.0,
+    },
+    "distance_to_center_km": {"required": False, "min": 0.0, "max": 50.0, "max_null_pct": 0.0},
+    # NaN allowed when the listing did not name a metro station (unknown ≈ 3.6%).
+    # Upper bound is 50 km to accommodate suburban districts (Курортный, Кронштадтский,
+    # Петродворцовый) where the named metro station is far from the listing.
+    "distance_to_metro_km": {"required": False, "min": 0.0, "max": 50.0, "max_null_pct": 0.05},
+    "metro_known": {"required": False, "max_null_pct": 0.0},
+    # Active modeling target derived in build_features.py; optional in raw clean.csv.
+    "target_price_per_sqm": {"required": False, "min": 50_000, "max": 3_000_000, "max_null_pct": 0.0},
 }
 
 

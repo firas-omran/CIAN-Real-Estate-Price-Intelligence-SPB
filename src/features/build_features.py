@@ -6,10 +6,11 @@ import argparse
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 
-DEFAULT_INPUT = Path("data/processed/cian_spb_clean.csv")
+DEFAULT_INPUT = Path("data/processed/cian_spb_clean_geo.csv")
 DEFAULT_OUTPUT_DIR = Path("data/features")
 
 BASE_FEATURES = [
@@ -30,9 +31,15 @@ BASE_FEATURES = [
     "district",
     "underground",
     "residential_complex",
+    "lat",
+    "lon",
+    "geo_precision",
+    "distance_to_center_km",
+    "distance_to_metro_km",
+    "metro_known",
 ]
 
-TARGET_COLUMNS = ["price", "log_price"]
+TARGET_COLUMNS = ["price", "log_price", "target_price_per_sqm", "log_target_price_per_sqm"]
 
 
 def build_market_aggregates(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
@@ -54,9 +61,9 @@ def build_market_aggregates(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
                 **{
                     f"{prefix}_ads_count": ("listing_id", "count"),
                     f"{prefix}_median_price": ("price", "median"),
-                    f"{prefix}_median_price_per_sqm": ("price_per_sqm_eda", "median"),
-                    f"{prefix}_p25_price_per_sqm": ("price_per_sqm_eda", lambda s: s.quantile(0.25)),
-                    f"{prefix}_p75_price_per_sqm": ("price_per_sqm_eda", lambda s: s.quantile(0.75)),
+                    f"{prefix}_median_price_per_sqm": ("target_price_per_sqm", "median"),
+                    f"{prefix}_p25_price_per_sqm": ("target_price_per_sqm", lambda s: s.quantile(0.25)),
+                    f"{prefix}_p75_price_per_sqm": ("target_price_per_sqm", lambda s: s.quantile(0.75)),
                 }
             )
             .reset_index()
@@ -82,14 +89,23 @@ def attach_aggregates(df: pd.DataFrame, aggregates: dict[str, pd.DataFrame]) -> 
     return featured
 
 
+def add_targets(clean_df: pd.DataFrame) -> pd.DataFrame:
+    """Compute training targets: price_per_sqm and its log1p."""
+    out = clean_df.copy()
+    out["target_price_per_sqm"] = out["price"] / out["total_meters"]
+    out["log_target_price_per_sqm"] = np.log1p(out["target_price_per_sqm"])
+    return out
+
+
 def build_offline_features(clean_df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
     """Build a model-ready offline feature table and aggregate lookup tables."""
-    aggregates = build_market_aggregates(clean_df)
-    feature_source = clean_df[BASE_FEATURES + TARGET_COLUMNS + ["price_per_sqm_eda"]].copy()
-    offline = attach_aggregates(feature_source, aggregates)
+    enriched = add_targets(clean_df)
+    aggregates = build_market_aggregates(enriched)
 
-    leakage_columns = ["price_per_sqm_eda"]
-    offline = offline.drop(columns=leakage_columns)
+    available_base = [col for col in BASE_FEATURES if col in enriched.columns]
+    available_targets = [col for col in TARGET_COLUMNS if col in enriched.columns]
+    feature_source = enriched[available_base + available_targets].copy()
+    offline = attach_aggregates(feature_source, aggregates)
     return offline, aggregates
 
 
@@ -123,7 +139,7 @@ def build_feature_registry() -> list[dict[str, object]]:
             "offline": True,
             "online": True,
             "refresh": "per request / listing input",
-            "description": "Apartment area in square meters.",
+            "description": "Apartment area in square meters; also used to reconstruct price from price_per_sqm prediction.",
             "leakage_risk": "low",
         },
         {
@@ -153,7 +169,7 @@ def build_feature_registry() -> list[dict[str, object]]:
             "offline": True,
             "online": True,
             "refresh": "weekly snapshot / user input",
-            "description": "District as a coarse spatial market segment.",
+            "description": "Saint Petersburg district from VALID_SPB_DISTRICTS whitelist; coarse spatial market segment.",
             "leakage_risk": "low",
         },
         {
@@ -163,7 +179,57 @@ def build_feature_registry() -> list[dict[str, object]]:
             "offline": True,
             "online": True,
             "refresh": "weekly snapshot / user input",
-            "description": "Nearest metro station proxy when coordinates are unavailable.",
+            "description": "Nearest metro station name as named in the listing; ~96% of rows have a real station, the rest are 'unknown'.",
+            "leakage_risk": "low",
+        },
+        {
+            "feature": "lat, lon",
+            "source": "geocoder (Nominatim) of street + house_number + district",
+            "type": "numeric",
+            "offline": True,
+            "online": True,
+            "refresh": "per request / listing input",
+            "description": "Geographic coordinates of the listing; resolved with three precision tiers (house/street/district fallback).",
+            "leakage_risk": "low",
+        },
+        {
+            "feature": "geo_precision",
+            "source": "geocoder result tier",
+            "type": "categorical",
+            "offline": True,
+            "online": True,
+            "refresh": "per request / listing input",
+            "description": "Geocoding precision: 'house' / 'street' / 'district'. Lets the model downweight low-precision rows.",
+            "leakage_risk": "low",
+        },
+        {
+            "feature": "distance_to_center_km",
+            "source": "haversine(lat, lon, Дворцовая 59.9386, 30.3141)",
+            "type": "numeric",
+            "offline": True,
+            "online": True,
+            "refresh": "per request / listing input",
+            "description": "Distance from the listing to Saint Petersburg center (Palace Square) in kilometers.",
+            "leakage_risk": "low",
+        },
+        {
+            "feature": "distance_to_metro_km",
+            "source": "haversine(lat, lon, named_station_lat, named_station_lon)",
+            "type": "numeric",
+            "offline": True,
+            "online": True,
+            "refresh": "per request / listing input",
+            "description": "Distance to the metro station named in the listing; NaN when the listing did not name a station.",
+            "leakage_risk": "low",
+        },
+        {
+            "feature": "metro_known",
+            "source": "underground != 'unknown' and station resolved by geocoder",
+            "type": "boolean",
+            "offline": True,
+            "online": True,
+            "refresh": "per request / listing input",
+            "description": "Flag indicating whether distance_to_metro_km is meaningful (True) or missing (False).",
             "leakage_risk": "low",
         },
         {
@@ -197,13 +263,23 @@ def build_feature_registry() -> list[dict[str, object]]:
             "leakage_risk": "medium: compute on train split for experiments",
         },
         {
-            "feature": "price, log_price",
-            "source": "CIAN listing target",
+            "feature": "target_price_per_sqm, log_target_price_per_sqm",
+            "source": "price / total_meters and its log1p",
             "type": "target",
             "offline": True,
             "online": False,
             "refresh": "weekly snapshot",
-            "description": "Training target; log_price is planned modeling target.",
+            "description": "Active modeling target. Models are trained on log_target_price_per_sqm; price is reconstructed as expm1(pred) * total_meters for business metrics.",
+            "leakage_risk": "target, never use as input feature",
+        },
+        {
+            "feature": "price, log_price",
+            "source": "CIAN listing",
+            "type": "target",
+            "offline": True,
+            "online": False,
+            "refresh": "weekly snapshot",
+            "description": "Original raw price target; kept for backward compatibility with checkpoint 1 baselines and business metrics.",
             "leakage_risk": "target, never use as input feature",
         },
     ]

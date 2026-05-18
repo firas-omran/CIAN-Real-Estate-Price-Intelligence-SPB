@@ -26,7 +26,7 @@
     "offline": true,
     "online": true,
     "refresh": "per request / listing input",
-    "description": "Apartment area in square meters.",
+    "description": "Apartment area in square meters; also used to reconstruct price from price_per_sqm prediction.",
     "leakage_risk": "low"
   },
   {
@@ -56,7 +56,7 @@
     "offline": true,
     "online": true,
     "refresh": "weekly snapshot / user input",
-    "description": "District as a coarse spatial market segment.",
+    "description": "Saint Petersburg district from VALID_SPB_DISTRICTS whitelist; coarse spatial market segment.",
     "leakage_risk": "low"
   },
   {
@@ -66,7 +66,57 @@
     "offline": true,
     "online": true,
     "refresh": "weekly snapshot / user input",
-    "description": "Nearest metro station proxy when coordinates are unavailable.",
+    "description": "Nearest metro station name as named in the listing; ~96% of rows have a real station, the rest are 'unknown'.",
+    "leakage_risk": "low"
+  },
+  {
+    "feature": "lat, lon",
+    "source": "geocoder (Nominatim) of street + house_number + district",
+    "type": "numeric",
+    "offline": true,
+    "online": true,
+    "refresh": "per request / listing input",
+    "description": "Geographic coordinates of the listing; resolved with three precision tiers (house/street/district fallback).",
+    "leakage_risk": "low"
+  },
+  {
+    "feature": "geo_precision",
+    "source": "geocoder result tier",
+    "type": "categorical",
+    "offline": true,
+    "online": true,
+    "refresh": "per request / listing input",
+    "description": "Geocoding precision: 'house' / 'street' / 'district'. Lets the model downweight low-precision rows.",
+    "leakage_risk": "low"
+  },
+  {
+    "feature": "distance_to_center_km",
+    "source": "haversine(lat, lon, Дворцовая 59.9386, 30.3141)",
+    "type": "numeric",
+    "offline": true,
+    "online": true,
+    "refresh": "per request / listing input",
+    "description": "Distance from the listing to Saint Petersburg center (Palace Square) in kilometers.",
+    "leakage_risk": "low"
+  },
+  {
+    "feature": "distance_to_metro_km",
+    "source": "haversine(lat, lon, named_station_lat, named_station_lon)",
+    "type": "numeric",
+    "offline": true,
+    "online": true,
+    "refresh": "per request / listing input",
+    "description": "Distance to the metro station named in the listing; NaN when the listing did not name a station.",
+    "leakage_risk": "low"
+  },
+  {
+    "feature": "metro_known",
+    "source": "underground != 'unknown' and station resolved by geocoder",
+    "type": "boolean",
+    "offline": true,
+    "online": true,
+    "refresh": "per request / listing input",
+    "description": "Flag indicating whether distance_to_metro_km is meaningful (True) or missing (False).",
     "leakage_risk": "low"
   },
   {
@@ -100,13 +150,23 @@
     "leakage_risk": "medium: compute on train split for experiments"
   },
   {
-    "feature": "price, log_price",
-    "source": "CIAN listing target",
+    "feature": "target_price_per_sqm, log_target_price_per_sqm",
+    "source": "price / total_meters and its log1p",
     "type": "target",
     "offline": true,
     "online": false,
     "refresh": "weekly snapshot",
-    "description": "Training target; log_price is planned modeling target.",
+    "description": "Active modeling target. Models are trained on log_target_price_per_sqm; price is reconstructed as expm1(pred) * total_meters for business metrics.",
+    "leakage_risk": "target, never use as input feature"
+  },
+  {
+    "feature": "price, log_price",
+    "source": "CIAN listing",
+    "type": "target",
+    "offline": true,
+    "online": false,
+    "refresh": "weekly snapshot",
+    "description": "Original raw price target; kept for backward compatibility with checkpoint 1 baselines and business metrics.",
     "leakage_risk": "target, never use as input feature"
   }
 ]
