@@ -1,0 +1,202 @@
+[
+  {
+    "feature": "room_segment",
+    "source": "collector segment",
+    "type": "categorical",
+    "offline": true,
+    "online": true,
+    "refresh": "weekly snapshot / user input",
+    "description": "Reliable room segment from collector: studio, 1room, 2rooms, 3rooms, 4rooms.",
+    "leakage_risk": "low"
+  },
+  {
+    "feature": "rooms_count",
+    "source": "CIAN normalized listing",
+    "type": "numeric/categorical",
+    "offline": true,
+    "online": true,
+    "refresh": "weekly snapshot",
+    "description": "Number of rooms parsed from listing segment.",
+    "leakage_risk": "low"
+  },
+  {
+    "feature": "total_meters",
+    "source": "CIAN normalized listing",
+    "type": "numeric",
+    "offline": true,
+    "online": true,
+    "refresh": "per request / listing input",
+    "description": "Apartment area in square meters; also used to reconstruct price from price_per_sqm prediction.",
+    "leakage_risk": "low"
+  },
+  {
+    "feature": "floor_ratio",
+    "source": "floor / floors_count",
+    "type": "numeric",
+    "offline": true,
+    "online": true,
+    "refresh": "per request / listing input",
+    "description": "Relative floor position in the building.",
+    "leakage_risk": "low"
+  },
+  {
+    "feature": "is_first_floor, is_last_floor",
+    "source": "floor, floors_count",
+    "type": "boolean",
+    "offline": true,
+    "online": true,
+    "refresh": "per request / listing input",
+    "description": "Floor-position flags that often affect apartment liquidity and price.",
+    "leakage_risk": "low"
+  },
+  {
+    "feature": "district",
+    "source": "CIAN listing",
+    "type": "categorical",
+    "offline": true,
+    "online": true,
+    "refresh": "weekly snapshot / user input",
+    "description": "Saint Petersburg district from VALID_SPB_DISTRICTS whitelist; coarse spatial market segment.",
+    "leakage_risk": "low"
+  },
+  {
+    "feature": "underground",
+    "source": "CIAN listing",
+    "type": "categorical",
+    "offline": true,
+    "online": true,
+    "refresh": "weekly snapshot / user input",
+    "description": "Nearest metro station name as named in the listing; ~96% of rows have a real station, the rest are 'unknown'.",
+    "leakage_risk": "low"
+  },
+  {
+    "feature": "lat, lon",
+    "source": "geocoder (Nominatim) of street + house_number + district",
+    "type": "numeric",
+    "offline": true,
+    "online": true,
+    "refresh": "per request / listing input",
+    "description": "Geographic coordinates of the listing; resolved with three precision tiers (house/street/district fallback).",
+    "leakage_risk": "low"
+  },
+  {
+    "feature": "geo_precision",
+    "source": "geocoder result tier",
+    "type": "categorical",
+    "offline": true,
+    "online": true,
+    "refresh": "per request / listing input",
+    "description": "Geocoding precision: 'house' / 'street' / 'district'. Lets the model downweight low-precision rows.",
+    "leakage_risk": "low"
+  },
+  {
+    "feature": "distance_to_center_km",
+    "source": "haversine(lat, lon, Дворцовая 59.9386, 30.3141)",
+    "type": "numeric",
+    "offline": true,
+    "online": true,
+    "refresh": "per request / listing input",
+    "description": "Distance from the listing to Saint Petersburg center (Palace Square) in kilometers.",
+    "leakage_risk": "low"
+  },
+  {
+    "feature": "distance_to_metro_km",
+    "source": "haversine(lat, lon, named_station_lat, named_station_lon)",
+    "type": "numeric",
+    "offline": true,
+    "online": true,
+    "refresh": "per request / listing input",
+    "description": "Distance to the metro station named in the listing; NaN when the listing did not name a station.",
+    "leakage_risk": "low"
+  },
+  {
+    "feature": "distance_to_metro_route_km",
+    "source": "openrouteservice Directions API, profile foot-walking",
+    "type": "numeric",
+    "offline": true,
+    "online": true,
+    "refresh": "weekly snapshot / API route cache",
+    "description": "Pedestrian route distance from listing coordinates to the named metro station. Falls back to missing when API key or route is unavailable.",
+    "leakage_risk": "low"
+  },
+  {
+    "feature": "duration_to_metro_route_min",
+    "source": "openrouteservice Directions API, profile foot-walking",
+    "type": "numeric",
+    "offline": true,
+    "online": true,
+    "refresh": "weekly snapshot / API route cache",
+    "description": "Estimated walking duration from listing coordinates to the named metro station.",
+    "leakage_risk": "low"
+  },
+  {
+    "feature": "metro_route_provider",
+    "source": "routing metadata",
+    "type": "categorical metadata",
+    "offline": true,
+    "online": true,
+    "refresh": "weekly snapshot / API route cache",
+    "description": "Routing source for metro walking distance, e.g. openrouteservice:foot-walking.",
+    "leakage_risk": "low"
+  },
+  {
+    "feature": "metro_known",
+    "source": "underground != 'unknown' and station resolved by geocoder",
+    "type": "boolean",
+    "offline": true,
+    "online": true,
+    "refresh": "per request / listing input",
+    "description": "Flag indicating whether distance_to_metro_km is meaningful (True) or missing (False).",
+    "leakage_risk": "low"
+  },
+  {
+    "feature": "district_rooms_median_price_per_sqm",
+    "source": "market aggregate from cleaned CIAN snapshot",
+    "type": "numeric aggregate",
+    "offline": true,
+    "online": true,
+    "refresh": "weekly snapshot",
+    "description": "Median market price per square meter for district and room segment.",
+    "leakage_risk": "medium: compute on train split for experiments"
+  },
+  {
+    "feature": "district_rooms_ads_count",
+    "source": "market aggregate from cleaned CIAN snapshot",
+    "type": "numeric aggregate",
+    "offline": true,
+    "online": true,
+    "refresh": "weekly snapshot",
+    "description": "Number of comparable listings in district and room segment.",
+    "leakage_risk": "low"
+  },
+  {
+    "feature": "underground_median_price_per_sqm",
+    "source": "market aggregate from cleaned CIAN snapshot",
+    "type": "numeric aggregate",
+    "offline": true,
+    "online": true,
+    "refresh": "weekly snapshot",
+    "description": "Median market price per square meter near metro station.",
+    "leakage_risk": "medium: compute on train split for experiments"
+  },
+  {
+    "feature": "target_price_per_sqm, log_target_price_per_sqm",
+    "source": "price / total_meters and its log1p",
+    "type": "target",
+    "offline": true,
+    "online": false,
+    "refresh": "weekly snapshot",
+    "description": "Active modeling target. Models are trained on log_target_price_per_sqm; price is reconstructed as expm1(pred) * total_meters for business metrics.",
+    "leakage_risk": "target, never use as input feature"
+  },
+  {
+    "feature": "price, log_price",
+    "source": "CIAN listing",
+    "type": "target",
+    "offline": true,
+    "online": false,
+    "refresh": "weekly snapshot",
+    "description": "Original raw price target; kept for backward compatibility with checkpoint 1 baselines and business metrics.",
+    "leakage_risk": "target, never use as input feature"
+  }
+]
