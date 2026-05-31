@@ -1,42 +1,42 @@
 # CIAN SPB EDA Summary
 
-- Rows after cleaning: 1300
-- Collection window: 2026-05-04T21:42:16.586850+00:00 - 2026-05-04T21:45:59.274940+00:00
-- Median price: 17,700,000 RUB
-- Mean price: 36,466,864 RUB
-- Median area: 58.0 m2
-- Median price per m2: 339,430 RUB
+- Rows after cleaning: 2202
+- Collection window: 2026-05-31T10:25:45.229890+00:00 - 2026-05-31T10:31:23.295307+00:00
+- Median price: 16,509,019 RUB
+- Mean price: 30,261,391 RUB
+- Median area: 57.2 m2
+- Median price per m2: 314,671 RUB
 - Room distribution:
 
 rooms_count
-0    263
-1    258
-2    261
-3    255
-4    263
+0    423
+1    480
+2    454
+3    391
+4    454
 
 - Room segment distribution:
 
 room_segment
-1room     258
-2rooms    261
-3rooms    255
-4rooms    263
-studio    263
+1room     480
+2rooms    454
+3rooms    391
+4rooms    454
+studio    423
 
 ## Geocoding Coverage
 
-- Geocoded rows: 1300 / 1300 (100%)
+- Geocoded rows: 2202 / 2202 (100%)
 - Precision tiers:
-  - house  : 1016 (78.2%)
-  - street : 118 (9.1%)
-  - district fallback: 166 (12.8%)
-- Metro distance available: 1253 / 1300 (96.4%)
-- Median distance to center: 6.78 km
-- Median distance to metro (when known): 1.41 km
-- Metro walking route available: 1253 / 1300 (96.4%)
-- Median walking route distance to metro: 1.76 km
-- Median walking route duration to metro: 21.1 min
+  - house  : 1642 (74.6%)
+  - street : 205 (9.3%)
+  - district fallback: 355 (16.1%)
+- Metro distance available: 2140 / 2202 (97.2%)
+- Median distance to center: 8.31 km
+- Median distance to metro (when known): 1.59 km
+- Metro walking route available: 2140 / 2202 (97.2%)
+- Median walking route distance to metro: 2.01 km
+- Median walking route duration to metro: 24.1 min
 
 
 - Figures directory: `data/processed/figures`

@@ -1,9 +1,9 @@
 {
-  "created_at_utc": "2026-05-24T13:11:52.271267+00:00",
+  "created_at_utc": "2026-05-31T14:50:10.593989+00:00",
   "input_path": "data/features/cian_spb_offline_features.csv",
-  "dataset_sha256": "0c6708811b5a46cd786a887e44f8bd7368b1841d42276fbf3d9836aad15cade6",
+  "dataset_sha256": "cbde6ac6dc2776068c17d0230723cd79c554a44151128aaa1f1fc0af0b7a2917",
   "dataset_shape": {
-    "rows": 1300,
+    "rows": 2202,
     "columns": 50
   },
   "selected_feature_count": 20,
@@ -56,9 +56,9 @@
   "target": "log_target_price_per_sqm",
   "split": {
     "strategy": "train/val/test",
-    "train_rows": 780,
-    "val_rows": 260,
-    "test_rows": 260,
+    "train_rows": 1321,
+    "val_rows": 440,
+    "test_rows": 441,
     "ratio": "60/20/20",
     "stratify": "rooms_count",
     "random_state": 42
@@ -69,9 +69,9 @@
     "r2_per_sqm": 0.313709
   },
   "environment": {
-    "python": "3.13.5",
-    "platform": "macOS-15.7.4-arm64-arm-64bit-Mach-O",
-    "sklearn": "1.6.1"
+    "python": "3.11.15",
+    "platform": "Linux-6.12.72-linuxkit-aarch64-with-glibc2.41",
+    "sklearn": "1.8.0"
   },
   "models": {
     "ridge_linear": {

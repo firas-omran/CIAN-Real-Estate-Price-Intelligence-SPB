@@ -121,7 +121,7 @@ real-estate-price-explorer/
 - [x] Чекпоинт 1: Постановка задачи и первичное проектирование на CIAN
 - [x] Чекпоинт 2: Data Engineering и пайплайн данных
 - [x] Чекпоинт 3: Моделирование и эксперименты
-- [ ] Чекпоинт 4: Деплой, мониторинг и эксплуатация
+- [x] Чекпоинт 4: Деплой, мониторинг и эксплуатация
 
 ## Checkpoint 3 experiments
 
@@ -145,4 +145,46 @@ python -m src.pipeline.auto_retrain --dry-run
 
 ```text
 docs/checkpoint3_modeling.md
+```
+
+## Checkpoint 4 demo
+
+API:
+
+```bash
+arch -arm64 python -m uvicorn src.api.main:app --reload --port 8000
+```
+
+Streamlit app:
+
+```bash
+arch -arm64 python -m streamlit run src/app/streamlit_app.py
+```
+
+Open the Streamlit tab `Monitoring & Drift` and switch from
+`Normal snapshot` to `Degradation / drift demo` to show data drift, alerts,
+and runbook actions.
+
+Main report:
+
+```text
+docs/checkpoint4_deployment_monitoring.md
+```
+
+Optional production-like MLOps stack:
+
+```bash
+docker compose up --build
+```
+
+Services:
+
+```text
+FastAPI:    http://localhost:8000/docs
+Streamlit:  http://localhost:8501
+MLflow:     http://localhost:5001
+Kafka UI:   http://localhost:8085
+Prometheus: http://localhost:9090
+Grafana:    http://localhost:3000  (admin / admin)
+Airflow:    http://localhost:8080  (admin / admin)
 ```

@@ -1,5 +1,8 @@
 # Data
 data/raw/
+data/airflow/
+data/mlflow/
+data/mlruns/
 *.csv
 *.parquet
 *.zip

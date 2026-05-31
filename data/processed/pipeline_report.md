@@ -4,57 +4,58 @@
 
 | Artifact | Rows | Columns |
 |---|---:|---:|
-| `data/processed/cian_spb_clean.csv` | 1300 | 27 |
-| `data/processed/cian_spb_clean_geo.csv` | 1300 | 36 |
-| `data/features/cian_spb_offline_features.csv` | 1300 | 50 |
+| `data/raw/cian_spb_normalized_20260531_102418.csv` | 2539 | 24 |
+| `data/processed/cian_spb_clean.csv` | 2202 | 27 |
+| `data/processed/cian_spb_clean_geo.csv` | 2202 | 36 |
+| `data/features/cian_spb_offline_features.csv` | 2202 | 50 |
 | `data/features/cian_spb_district_market_aggregates.csv` | 18 | 6 |
-| `data/features/cian_spb_district_rooms_market_aggregates.csv` | 89 | 7 |
-| `data/features/cian_spb_underground_market_aggregates.csv` | 73 | 6 |
+| `data/features/cian_spb_district_rooms_market_aggregates.csv` | 90 | 7 |
+| `data/features/cian_spb_underground_market_aggregates.csv` | 74 | 6 |
 | `data/features/cian_spb_room_segment_market_aggregates.csv` | 5 | 6 |
 | `data/features/cian_spb_rooms_market_aggregates.csv` | 5 | 6 |
-| `data/processed/cian_spb_balanced_sample.csv` | 1275 | 27 |
+| `data/processed/cian_spb_balanced_sample.csv` | 1955 | 27 |
 
 ## Clean Data Summary
 
 - Data Contract status: OK if `python -m src.data.contract_cian data/processed/cian_spb_clean.csv` passes.
-- Clean rows: 1300
-- Median price: 17,700,000 RUB
-- Median area: 58.0 m2
+- Clean rows: 2202
+- Median price: 16,509,019 RUB
+- Median area: 57.2 m2
 
 Room distribution:
 
 rooms_count
-0    263
-1    258
-2    261
-3    255
-4    263
+0    423
+1    480
+2    454
+3    391
+4    454
 
 Room segment distribution:
 
 room_segment
-1room     258
-2rooms    261
-3rooms    255
-4rooms    263
-studio    263
+1room     480
+2rooms    454
+3rooms    391
+4rooms    454
+studio    423
 
 ## Metro Routing
 
-- Metro route distance coverage: 1253 / 1300
-- Median route distance to metro: 1.76 km
-- Median route duration to metro: 21.1 min
+- Metro route distance coverage: 2140 / 2202
+- Median route distance to metro: 2.01 km
+- Median route duration to metro: 24.1 min
 
 ## Sampling
 
 Balanced sample distribution:
 
 rooms_count
-0    255
-1    255
-2    255
-3    255
-4    255
+0    391
+1    391
+2    391
+3    391
+4    391
 
 ## Feature Store
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import platform
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,9 +28,16 @@ from sklearn.model_selection import KFold, cross_validate, train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
+try:
+    import mlflow
+    import mlflow.sklearn
+except ModuleNotFoundError:  # pragma: no cover - optional production dependency
+    mlflow = None
+
 DEFAULT_INPUT = Path("data/features/cian_spb_offline_features.csv")
 DEFAULT_OUTPUT_DIR = Path("data/experiments")
 DEFAULT_MODEL_DIR = Path("data/models")
+MLFLOW_EXPERIMENT_NAME = "cian_spb_price_intelligence"
 RANDOM_STATE = 42
 N_SPLITS = 5
 TARGET = "log_target_price_per_sqm"
@@ -221,8 +229,63 @@ def collect_model_params(model: Pipeline) -> dict[str, Any]:
     }
 
 
+def mlflow_enabled() -> bool:
+    """Return whether MLflow logging should be attempted."""
+    return mlflow is not None and os.getenv("DISABLE_MLFLOW", "0") != "1"
+
+
+def setup_mlflow() -> None:
+    """Configure MLflow experiment if the optional dependency is available."""
+    if not mlflow_enabled():
+        return
+    tracking_uri = os.getenv("MLFLOW_TRACKING_URI")
+    if tracking_uri:
+        mlflow.set_tracking_uri(tracking_uri)
+    else:
+        mlflow.set_tracking_uri("file:data/mlruns")
+    mlflow.set_experiment(os.getenv("MLFLOW_EXPERIMENT_NAME", MLFLOW_EXPERIMENT_NAME))
+
+
+def log_model_to_mlflow(
+    *,
+    model_name: str,
+    model: Pipeline,
+    row: dict[str, Any],
+    metadata: dict[str, Any],
+    model_path: Path,
+) -> None:
+    """Log one trained model run to MLflow when available."""
+    if not mlflow_enabled():
+        return
+    try:
+        with mlflow.start_run(run_name=model_name):
+            mlflow.log_param("model_name", model_name)
+            mlflow.log_param("model_class", row["model_class"])
+            mlflow.log_param("dataset_sha256", metadata["dataset_sha256"])
+            mlflow.log_param("feature_count", metadata["selected_feature_count"])
+            mlflow.log_param("random_state", RANDOM_STATE)
+            mlflow.log_params(collect_model_params(model))
+            for key in [
+                "cv_r2_log_mean",
+                "cv_r2_log_std",
+                "val_r2_per_sqm",
+                "val_mae_per_sqm",
+                "val_mape_percent",
+                "test_r2_per_sqm",
+                "test_mae_per_sqm",
+                "test_mape_percent",
+                "improvement_vs_baseline_r2",
+            ]:
+                mlflow.log_metric(key, float(row[key]))
+            mlflow.log_artifact(str(model_path))
+            mlflow.sklearn.log_model(model, artifact_path="model")
+    except Exception as exc:
+        print(f"MLflow logging skipped for {model_name}: {exc}")
+
+
 def run_experiments(input_path: Path, output_dir: Path, model_dir: Path) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Run all experiments and persist metrics, metadata, and models."""
+    setup_mlflow()
     df = pd.read_csv(input_path)
     X, y, numeric_features, categorical_features = select_features(df)
     x_train, x_val, x_test, y_train, y_val, y_test = split_data(X, y)
@@ -231,6 +294,7 @@ def run_experiments(input_path: Path, output_dir: Path, model_dir: Path) -> tupl
     output_dir.mkdir(parents=True, exist_ok=True)
     model_dir.mkdir(parents=True, exist_ok=True)
 
+    dataset_sha256 = file_sha256(input_path)
     rows: list[dict[str, Any]] = [
         {
             "model": "B2_non_ml_baseline",
@@ -247,6 +311,36 @@ def run_experiments(input_path: Path, output_dir: Path, model_dir: Path) -> tupl
         }
     ]
     model_metadata: dict[str, Any] = {}
+    metadata_base = {
+        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "input_path": str(input_path),
+        "dataset_sha256": dataset_sha256,
+        "dataset_shape": {"rows": int(df.shape[0]), "columns": int(df.shape[1])},
+        "selected_feature_count": len(X.columns),
+        "selected_features": list(X.columns),
+        "numeric_features": numeric_features,
+        "categorical_features": categorical_features,
+        "target": TARGET,
+        "split": {
+            "strategy": "train/val/test",
+            "train_rows": int(x_train.shape[0]),
+            "val_rows": int(x_val.shape[0]),
+            "test_rows": int(x_test.shape[0]),
+            "ratio": "60/20/20",
+            "stratify": "rooms_count",
+            "random_state": RANDOM_STATE,
+        },
+        "baseline": {
+            "name": "B2_non_ml_baseline",
+            "definition": "median price_per_sqm by district + rooms_count",
+            "r2_per_sqm": BASELINE_R2_PER_SQM,
+        },
+        "environment": {
+            "python": platform.python_version(),
+            "platform": platform.platform(),
+            "sklearn": sklearn.__version__,
+        },
+    }
 
     cv = KFold(n_splits=N_SPLITS, shuffle=True, random_state=RANDOM_STATE)
     for name, model in model_specs.items():
@@ -285,7 +379,15 @@ def run_experiments(input_path: Path, output_dir: Path, model_dir: Path) -> tupl
             "params": collect_model_params(model),
             "model_path": str(model_dir / f"{name}.pkl"),
         }
-        joblib.dump(model, model_dir / f"{name}.pkl")
+        model_path = model_dir / f"{name}.pkl"
+        joblib.dump(model, model_path)
+        log_model_to_mlflow(
+            model_name=name,
+            model=model,
+            row=row,
+            metadata=metadata_base,
+            model_path=model_path,
+        )
         print(
             f"test R2={row['test_r2_per_sqm']:.4f} "
             f"MAE={row['test_mae_per_sqm']:,.0f} "
@@ -293,37 +395,7 @@ def run_experiments(input_path: Path, output_dir: Path, model_dir: Path) -> tupl
         )
 
     metrics = pd.DataFrame(rows).sort_values("test_r2_per_sqm", ascending=False)
-    metadata = {
-        "created_at_utc": datetime.now(timezone.utc).isoformat(),
-        "input_path": str(input_path),
-        "dataset_sha256": file_sha256(input_path),
-        "dataset_shape": {"rows": int(df.shape[0]), "columns": int(df.shape[1])},
-        "selected_feature_count": len(X.columns),
-        "selected_features": list(X.columns),
-        "numeric_features": numeric_features,
-        "categorical_features": categorical_features,
-        "target": TARGET,
-        "split": {
-            "strategy": "train/val/test",
-            "train_rows": int(x_train.shape[0]),
-            "val_rows": int(x_val.shape[0]),
-            "test_rows": int(x_test.shape[0]),
-            "ratio": "60/20/20",
-            "stratify": "rooms_count",
-            "random_state": RANDOM_STATE,
-        },
-        "baseline": {
-            "name": "B2_non_ml_baseline",
-            "definition": "median price_per_sqm by district + rooms_count",
-            "r2_per_sqm": BASELINE_R2_PER_SQM,
-        },
-        "environment": {
-            "python": platform.python_version(),
-            "platform": platform.platform(),
-            "sklearn": sklearn.__version__,
-        },
-        "models": model_metadata,
-    }
+    metadata = {**metadata_base, "models": model_metadata}
     return metrics, metadata
 
 
