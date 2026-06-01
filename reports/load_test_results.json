@@ -1,0 +1,21 @@
+{
+  "serving_url": "http://api:8000",
+  "requests_total": 100,
+  "concurrency": 10,
+  "success_count": 100,
+  "error_count": 0,
+  "error_rate": 0.0,
+  "duration_seconds": 1.7640957509993314,
+  "throughput_rps": 56.68626543845573,
+  "latency_mean_ms": 171.43946428002891,
+  "latency_p50_ms": 172.93320799944922,
+  "latency_p95_ms": 237.7751250005531,
+  "latency_p99_ms": 263.58224999967206,
+  "latency_max_ms": 266.0447079997539,
+  "slo": {
+    "p95_latency_ms_threshold": 500.0,
+    "error_rate_threshold": 0.05,
+    "passed": true
+  },
+  "errors_sample": []
+}

@@ -188,3 +188,19 @@ Prometheus: http://localhost:9090
 Grafana:    http://localhost:3000  (admin / admin)
 Airflow:    http://localhost:8080  (admin / admin)
 ```
+
+Load test:
+
+```bash
+docker compose --profile loadtest run --rm load-test
+docker compose --profile loadtest run --rm locust-load-test
+```
+
+Results:
+
+```text
+reports/load_test_results.json
+reports/load_test_report.md
+reports/locust/locust_summary.md
+reports/locust/*/report.html
+```

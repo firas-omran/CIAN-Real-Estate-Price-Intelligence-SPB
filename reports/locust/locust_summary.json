@@ -1,0 +1,53 @@
+[
+  {
+    "name": "smoke",
+    "users": 1,
+    "spawn_rate": 1,
+    "run_time": "1m",
+    "requests_total": 377,
+    "failure_count": 0,
+    "error_rate": 0.0,
+    "throughput_rps": 6.389066135713553,
+    "latency_mean_ms": 31.42899635809563,
+    "latency_p50_ms": 34.0,
+    "latency_p95_ms": 39.0,
+    "latency_p99_ms": 47.0,
+    "latency_max_ms": 49.78816699986055,
+    "html_report": "reports/locust/smoke/report.html",
+    "slo_passed": true
+  },
+  {
+    "name": "demo",
+    "users": 10,
+    "spawn_rate": 5,
+    "run_time": "5m",
+    "requests_total": 17399,
+    "failure_count": 0,
+    "error_rate": 0.0,
+    "throughput_rps": 58.0696080593514,
+    "latency_mean_ms": 45.75589243830351,
+    "latency_p50_ms": 43.0,
+    "latency_p95_ms": 90.0,
+    "latency_p99_ms": 120.0,
+    "latency_max_ms": 222.75708300003316,
+    "html_report": "reports/locust/demo/report.html",
+    "slo_passed": true
+  },
+  {
+    "name": "stress",
+    "users": 30,
+    "spawn_rate": 10,
+    "run_time": "5m",
+    "requests_total": 18348,
+    "failure_count": 0,
+    "error_rate": 0.0,
+    "throughput_rps": 61.25953056410908,
+    "latency_mean_ms": 362.23967057194005,
+    "latency_p50_ms": 360.0,
+    "latency_p95_ms": 560.0,
+    "latency_p99_ms": 630.0,
+    "latency_max_ms": 850.6286669999099,
+    "html_report": "reports/locust/stress/report.html",
+    "slo_passed": false
+  }
+]

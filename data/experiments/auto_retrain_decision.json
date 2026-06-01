@@ -1,5 +1,5 @@
 {
-  "created_at_utc": "2026-05-31T14:50:59.887512+00:00",
+  "created_at_utc": "2026-06-01T20:08:45.708262+00:00",
   "clean_geo_path": "data/processed/cian_spb_clean_geo.csv",
   "features_path": "data/features/cian_spb_offline_features.csv",
   "features_sha256": "cbde6ac6dc2776068c17d0230723cd79c554a44151128aaa1f1fc0af0b7a2917",
@@ -17,7 +17,7 @@
     {
       "name": "snapshot_age_days",
       "fired": false,
-      "value": 0.18,
+      "value": 1.4,
       "threshold": 7,
       "details": "freshness based on max collected_at"
     },

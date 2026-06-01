@@ -121,3 +121,32 @@ services:
     depends_on:
       - mlflow
       - kafka
+
+  load-test:
+    build: .
+    profiles:
+      - loadtest
+    command: >
+      python load_tests/cian_load_test.py
+      --serving-url http://api:8000
+      --requests 100
+      --concurrency 10
+      --output reports/load_test_results.json
+      --markdown-report reports/load_test_report.md
+    volumes:
+      - .:/app
+    depends_on:
+      - api
+
+  locust-load-test:
+    build: .
+    profiles:
+      - loadtest
+    command: >
+      python load_tests/run_locust_scenarios.py
+      --host http://api:8000
+      --output-dir reports/locust
+    volumes:
+      - .:/app
+    depends_on:
+      - api

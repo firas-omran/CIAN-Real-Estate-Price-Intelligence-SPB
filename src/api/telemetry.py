@@ -60,7 +60,12 @@ def kafka_producer() -> Any | None:
 
 
 def publish_prediction_event(payload: dict[str, Any]) -> bool:
-    """Publish a prediction event to Kafka when available."""
+    """Publish a prediction event to Kafka when available.
+
+    The send is intentionally non-blocking: prediction latency should not wait
+    for Kafka acknowledgements. Kafka UI/consumers may observe events a moment
+    later, while the API can keep serving low-latency predictions.
+    """
     producer = kafka_producer()
     if producer is None:
         return False
@@ -73,7 +78,6 @@ def publish_prediction_event(payload: dict[str, Any]) -> bool:
     }
     try:
         producer.send(topic, event)
-        producer.flush(timeout=1.0)
         return True
     except Exception:
         return False

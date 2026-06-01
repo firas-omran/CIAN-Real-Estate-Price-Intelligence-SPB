@@ -356,3 +356,109 @@ This satisfies the supervisor requirement:
 ```text
 Надо показать дрейф данных
 ```
+
+## 6. Load Testing
+
+Two load-test modes are implemented:
+
+```text
+load_tests/cian_load_test.py
+load_tests/locustfile.py
+load_tests/run_locust_scenarios.py
+```
+
+Both modes send concurrent requests to FastAPI `/predict`, validate that every
+response contains a positive prediction, and store machine-readable reports.
+
+### 6.1 Quick Concurrent Test
+
+Run:
+
+```bash
+docker compose --profile loadtest run --rm load-test
+```
+
+Equivalent direct command:
+
+```bash
+python load_tests/cian_load_test.py \
+  --serving-url http://localhost:8000 \
+  --requests 100 \
+  --concurrency 10 \
+  --output reports/load_test_results.json \
+  --markdown-report reports/load_test_report.md
+```
+
+Artifacts:
+
+```text
+reports/load_test_results.json
+reports/load_test_report.md
+```
+
+Latest result:
+
+| Metric | Value |
+|---|---:|
+| requests_total | 100 |
+| concurrency | 10 |
+| success_count | 100 |
+| error_count | 0 |
+| error_rate | 0.0 |
+| throughput_rps | 56.26 |
+| latency_mean_ms | 174.26 |
+| latency_p50_ms | 168.18 |
+| latency_p95_ms | 286.85 |
+| latency_p99_ms | 289.64 |
+| latency_max_ms | 291.89 |
+
+SLO:
+
+```text
+p95 latency <= 500 ms
+error rate <= 5%
+```
+
+Conclusion: the service processed all 100 requests without errors. Under the
+demo workload with 10 concurrent users, p95 latency was 286.85 ms, which is
+below the 500 ms threshold. The load test result is **PASSED**.
+
+### 6.2 Locust Scenarios
+
+Run all scenarios:
+
+```bash
+docker compose --profile loadtest run --rm locust-load-test
+```
+
+Scenarios:
+
+| Scenario | Users | Duration | Goal |
+|---|---:|---:|---|
+| smoke | 1 | 1 min | check that `/predict` is alive |
+| demo | 10 | 5 min | expected classroom demo workload |
+| stress | 30 | 5 min | find the degradation point |
+
+Artifacts:
+
+```text
+reports/locust/locust_summary.json
+reports/locust/locust_summary.md
+reports/locust/smoke/report.html
+reports/locust/demo/report.html
+reports/locust/stress/report.html
+```
+
+Latest Locust result:
+
+| Scenario | Users | RPS | p95 latency, ms | p99 latency, ms | Error rate | Result |
+|---|---:|---:|---:|---:|---:|---|
+| smoke | 1 | 6.39 | 39.00 | 47.00 | 0.00% | PASSED |
+| demo | 10 | 58.07 | 90.00 | 120.00 | 0.00% | PASSED |
+| stress | 30 | 61.26 | 560.00 | 630.00 | 0.00% | FAILED |
+
+Conclusion: the service satisfies the configured SLO for the expected demo
+load up to **10 concurrent users**. At **30 concurrent users**, the service
+still returns 0% errors, but p95 latency rises to 560 ms and crosses the 500 ms
+threshold. This is the operational degradation point for the current local
+single-worker Docker deployment.
