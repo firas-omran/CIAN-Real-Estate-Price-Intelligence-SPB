@@ -8,6 +8,7 @@ services:
       MLFLOW_TRACKING_URI: http://mlflow:5000
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_PREDICTION_TOPIC: cian.predictions
+      DGIS_API_KEY: ${DGIS_API_KEY:-}
     volumes:
       - .:/app
     depends_on:
@@ -23,6 +24,7 @@ services:
       MLFLOW_TRACKING_URI: http://mlflow:5000
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_PREDICTION_TOPIC: cian.predictions
+      DGIS_API_KEY: ${DGIS_API_KEY:-}
     volumes:
       - .:/app
     depends_on:

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import json
+import re
 import time
 from functools import lru_cache
 from pathlib import Path
@@ -12,15 +14,26 @@ import joblib
 import numpy as np
 import pandas as pd
 
-from src.features.geocoder import enrich_listing
 from src.api.telemetry import publish_prediction_event, record_prediction_metrics
+from src.data.clean_cian import VALID_SPB_DISTRICTS
+from src.features.geocoder import (
+    distance_to_center_km,
+    enrich_listing,
+    geocode_freeform_address,
+    nearest_district,
+    nearest_metro,
+)
 
 logger = logging.getLogger(__name__)
 
 METRICS_PATH = Path("data/experiments/checkpoint3_metrics.csv")
 MODEL_DIR = Path("data/models")
 FEATURES_PATH = Path("data/features/cian_spb_offline_features.csv")
+CLEAN_DATA_PATH = Path("data/processed/cian_spb_clean.csv")
+GEOCODE_CACHE_PATH = Path("data/cache/geocode_cache.json")
 BASELINE_MODEL = "B2_non_ml_baseline"
+HOUSE_NUMBER_PATTERN = re.compile(r"^\s*\d+")
+ADDRESS_HAS_NUMBER_PATTERN = re.compile(r"\d")
 
 
 def _room_segment(rooms_count: int) -> str:
@@ -56,11 +69,122 @@ def load_best_model() -> tuple[str, Any]:
 def serving_options() -> dict[str, list[str]]:
     """Return stable option lists for Streamlit controls."""
     df = load_reference_data()
-    return {
+    options = {
         "districts": sorted(df["district"].dropna().astype(str).unique().tolist()),
         "underground": sorted(df["underground"].dropna().astype(str).unique().tolist()),
         "author_types": sorted(df["author_type"].dropna().astype(str).unique().tolist()),
     }
+    options["address_examples"] = _address_examples()
+    return options
+
+
+@lru_cache(maxsize=1)
+def _address_examples(limit: int = 12) -> list[str]:
+    """Return real address examples from the cleaned CIAN snapshot."""
+    examples: list[str] = []
+    if GEOCODE_CACHE_PATH.exists():
+        try:
+            cache = json.loads(GEOCODE_CACHE_PATH.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            cache = {}
+        for key, value in cache.items():
+            if not key.startswith("house|"):
+                continue
+            try:
+                latlon = (float(value["lat"]), float(value["lon"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+            if not (59.73 <= latlon[0] <= 60.15 and 29.65 <= latlon[1] <= 30.70):
+                continue
+            parts = key.split("|")
+            if len(parts) != 4 or not HOUSE_NUMBER_PATTERN.match(parts[3]):
+                continue
+            examples.append(f"{parts[2].title()}, {parts[3]}")
+            if len(examples) >= limit:
+                return examples
+
+    if not CLEAN_DATA_PATH.exists():
+        return examples
+    df = pd.read_csv(CLEAN_DATA_PATH, usecols=["street", "house_number"])
+    df = df.dropna()
+    df["street"] = df["street"].astype(str).str.strip()
+    df["house_number"] = df["house_number"].astype(str).str.strip()
+    df = df[(df["street"] != "") & df["house_number"].str.match(HOUSE_NUMBER_PATTERN)]
+    examples.extend(f"{row.street}, {row.house_number}" for row in df.drop_duplicates().head(limit).itertuples())
+    return examples[:limit]
+
+
+def _has_address(street: str | None, house_number: str | None) -> bool:
+    return bool(str(street or "").strip() or str(house_number or "").strip())
+
+
+def _validate_address(street: str | None, house_number: str | None) -> None:
+    if not _has_address(street, house_number):
+        return
+    if not str(street or "").strip():
+        raise ValueError("Введите адрес квартиры.")
+    if str(house_number or "").strip() and HOUSE_NUMBER_PATTERN.match(str(house_number or "")) is None:
+        raise ValueError("Номер дома должен начинаться с цифры, например: 28, 10к2, 7литА.")
+    if not str(house_number or "").strip() and ADDRESS_HAS_NUMBER_PATTERN.search(str(street or "")) is None:
+        raise ValueError("Введите адрес с номером дома, например: Невский проспект, 81.")
+
+
+def _resolve_serving_geo(
+    *,
+    district: str | None,
+    underground: str | None,
+    street: str | None,
+    house_number: str | None,
+) -> tuple[str, str, dict[str, Any]]:
+    """Resolve serving-time geo features from address or manual fallback."""
+    _validate_address(street, house_number)
+
+    address_result = None
+    if _has_address(street, house_number):
+        address_result = geocode_freeform_address(street=street, house_number=house_number)
+        if address_result is None:
+            raise ValueError(
+                "Адрес не найден внутри границ Санкт-Петербурга. "
+                "Выберите подсказку 2GIS или уточните улицу и номер дома."
+            )
+
+    if address_result is not None:
+        inferred_district = nearest_district(address_result.lat, address_result.lon)
+        if inferred_district is None:
+            raise ValueError("Не удалось определить район по адресу.")
+
+        nearest_station = nearest_metro(address_result.lat, address_result.lon)
+        inferred_underground = nearest_station[0] if nearest_station else "unknown"
+        distance_metro = nearest_station[1] if nearest_station else None
+        distance_center = distance_to_center_km(address_result.lat, address_result.lon)
+        duration_metro = float(distance_metro) / 5.0 * 60.0 if distance_metro is not None else None
+
+        return inferred_district, inferred_underground, {
+            "lat": address_result.lat,
+            "lon": address_result.lon,
+            "geo_precision": "house",
+            "distance_to_center_km": distance_center,
+            "distance_to_metro_km": distance_metro,
+            "distance_to_metro_route_km": distance_metro,
+            "duration_to_metro_route_min": duration_metro,
+            "metro_route_provider": "nearest_metro:haversine",
+            "metro_known": nearest_station is not None,
+            "address_mode": "address",
+        }
+
+    fallback_district = str(district or "").strip()
+    if fallback_district not in VALID_SPB_DISTRICTS:
+        raise ValueError("Выберите район или введите полный адрес.")
+    fallback_underground = str(underground or "unknown").strip() or "unknown"
+    geo = enrich_listing(
+        district=fallback_district,
+        street=None,
+        house_number=None,
+        underground=fallback_underground,
+        with_routing=False,
+    )
+    geo["address_mode"] = "district_fallback"
+    return fallback_district, fallback_underground, geo
 
 
 def make_feature_row(
@@ -69,20 +193,19 @@ def make_feature_row(
     total_meters: float,
     floor: int,
     floors_count: int,
-    district: str,
-    underground: str,
+    district: str | None = None,
+    underground: str = "unknown",
     author_type: str = "real_estate_agent",
     street: str | None = None,
     house_number: str | None = None,
 ) -> pd.DataFrame:
     """Build one inference row with the feature names used by checkpoint 3."""
     floor_ratio = floor / floors_count if floors_count else np.nan
-    geo = enrich_listing(
+    resolved_district, resolved_underground, geo = _resolve_serving_geo(
         district=district,
         street=street,
         house_number=house_number,
         underground=underground,
-        with_routing=False,
     )
 
     route_distance = geo.get("distance_to_metro_route_km")
@@ -112,10 +235,11 @@ def make_feature_row(
         "metro_known": bool(geo.get("metro_known")),
         "author_type": author_type,
         "room_segment": _room_segment(rooms_count),
-        "district": district,
-        "underground": underground,
+        "district": resolved_district,
+        "underground": resolved_underground,
         "geo_precision": geo.get("geo_precision") or "district",
         "metro_route_provider": route_provider or "unknown",
+        "address_mode": geo.get("address_mode", "district_fallback"),
     }
     return pd.DataFrame([row])
 

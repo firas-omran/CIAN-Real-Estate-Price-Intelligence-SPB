@@ -11,11 +11,17 @@ from pathlib import Path
 import requests
 import streamlit as st
 
+try:
+    from streamlit_searchbox import st_searchbox
+except ModuleNotFoundError:  # pragma: no cover - optional UI enhancement
+    st_searchbox = None
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.api.predictor import predict_price, serving_options
+from src.features.geocoder import dgis_suggest_addresses
 from src.monitoring.checkpoint4 import monitoring_snapshot
 
 logging.basicConfig(
@@ -37,7 +43,7 @@ def _call_predict_api(**kwargs: object) -> dict:
     this is the dev/local fallback.
     """
     if API_URL:
-        payload = {k: v for k, v in kwargs.items() if v is not None and k not in ("street", "house_number")}
+        payload = {k: v for k, v in kwargs.items() if v is not None}
         payload.setdefault("street", "")
         payload.setdefault("house_number", "")
         started = time.perf_counter()
@@ -75,6 +81,18 @@ def rub(value: float) -> str:
     return f"{value:,.0f} руб.".replace(",", " ")
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _cached_dgis_suggestions(query: str) -> list[str]:
+    return [suggestion.label for suggestion in dgis_suggest_addresses(query)]
+
+
+def _search_address_suggestions(searchterm: str) -> list[str]:
+    searchterm = str(searchterm or "").strip()
+    if len(searchterm) < 3:
+        return []
+    return _cached_dgis_suggestions(searchterm)
+
+
 st.set_page_config(
     page_title="CIAN Real Estate Price Intelligence",
     layout="wide",
@@ -89,6 +107,41 @@ predict_tab, monitoring_tab = st.tabs(["Prediction", "Monitoring & Drift"])
 with predict_tab:
     st.sidebar.header("Параметры квартиры")
 
+    if st_searchbox is not None:
+        with st.sidebar:
+            selected_address = st_searchbox(
+                _search_address_suggestions,
+                key="address_searchbox",
+                label="Адрес",
+                placeholder="Начните вводить адрес: Невский проспект, 81",
+                default_options=options.get("address_examples", [])[:8],
+            )
+        selected_address = str(selected_address or "").strip()
+    else:
+        address_query = st.sidebar.text_input(
+            "Адрес",
+            value=st.session_state.get("address_query", ""),
+            placeholder="например: Невский проспект, 81",
+        )
+        st.session_state["address_query"] = address_query
+        suggestion_labels = _cached_dgis_suggestions(address_query) if len(address_query.strip()) >= 3 else []
+        if suggestion_labels:
+            selected_address = st.sidebar.selectbox(
+                "Выберите адрес",
+                options=[""] + suggestion_labels,
+                format_func=lambda value: "Выберите адрес из 2GIS" if value == "" else value,
+            )
+        else:
+            selected_address = ""
+            if len(address_query.strip()) < 3:
+                st.sidebar.caption("Начните вводить адрес, например: Невский проспект, 81.")
+            else:
+                st.sidebar.caption("2GIS не вернул подсказки. Уточните улицу и номер дома.")
+
+    resolved_address = selected_address
+    if selected_address:
+        st.sidebar.caption(f"Выбранный адрес: {selected_address}")
+
     rooms_count = st.sidebar.selectbox(
         "Количество комнат",
         options=[0, 1, 2, 3, 4],
@@ -97,34 +150,39 @@ with predict_tab:
     total_meters = st.sidebar.number_input("Площадь, м2", min_value=10.0, max_value=500.0, value=58.0, step=1.0)
     floor = st.sidebar.number_input("Этаж", min_value=1, max_value=100, value=5, step=1)
     floors_count = st.sidebar.number_input("Этажей в доме", min_value=1, max_value=100, value=12, step=1)
-    district = st.sidebar.selectbox("Район", options=options["districts"])
-    underground = st.sidebar.selectbox("Метро", options=options["underground"])
     author_type = st.sidebar.selectbox("Тип продавца", options=options["author_types"])
-
-    street = st.sidebar.text_input("Улица (опционально)", value="")
-    house_number = st.sidebar.text_input("Дом (опционально)", value="")
 
     if floor > floors_count:
         st.sidebar.warning("Этаж не должен быть больше количества этажей в доме.")
+    if not resolved_address.strip():
+        st.sidebar.warning("Введите адрес квартиры с номером дома.")
 
-    if st.sidebar.button("Оценить стоимость", type="primary", disabled=floor > floors_count):
+    if st.sidebar.button("Оценить стоимость", type="primary", disabled=floor > floors_count or not resolved_address.strip()):
         started = time.perf_counter()
-        result = _call_predict_api(
-            rooms_count=rooms_count,
-            total_meters=total_meters,
-            floor=floor,
-            floors_count=floors_count,
-            district=district,
-            underground=underground,
-            author_type=author_type,
-            street=street or None,
-            house_number=house_number or None,
-        )
+        try:
+            result = _call_predict_api(
+                rooms_count=rooms_count,
+                total_meters=total_meters,
+                floor=floor,
+                floors_count=floors_count,
+                district=None,
+                underground="unknown",
+                author_type=author_type,
+                street=resolved_address,
+                house_number=None,
+            )
+        except requests.HTTPError as exc:
+            detail = exc.response.text if exc.response is not None else str(exc)
+            st.error(f"Не удалось оценить квартиру: {detail}")
+            st.stop()
+        except ValueError as exc:
+            st.error(f"Не удалось оценить квартиру: {exc}")
+            st.stop()
         ui_latency_ms = (time.perf_counter() - started) * 1000
         logger.info(
             "streamlit prediction: model=%s district=%s rooms=%d area=%.0f price=%.0f ui_latency_ms=%.1f kafka=%s",
             result["model_name"],
-            district,
+            result["features"].get("district"),
             rooms_count,
             total_meters,
             result["predicted_price"],
@@ -148,6 +206,10 @@ with predict_tab:
         distance_metro = features.get("distance_to_metro_route_km")
         geo_cols[1].metric("До центра", f"{distance_center:.1f} км" if distance_center else "-")
         geo_cols[2].metric("До метро", f"{distance_metro:.1f} км" if distance_metro else "-")
+        st.caption(
+            f"Resolved location: район = {features.get('district')}, "
+            f"метро = {features.get('underground')}, mode = {features.get('address_mode')}"
+        )
 
         with st.expander("Model input features"):
             st.dataframe(features, use_container_width=True)

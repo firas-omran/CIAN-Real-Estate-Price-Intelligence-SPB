@@ -53,6 +53,10 @@ OPENROUTESERVICE_URL = "https://api.openrouteservice.org/v2/directions/foot-walk
 OPENROUTESERVICE_ENV = "OPENROUTESERVICE_API_KEY"
 OPENROUTESERVICE_DELAY_ENV = "OPENROUTESERVICE_DELAY_SECONDS"
 DEFAULT_OPENROUTESERVICE_DELAY_SECONDS = 1.5
+DGIS_API_KEY_ENV = "DGIS_API_KEY"
+DGIS_SUGGEST_URL = "https://catalog.api.2gis.com/3.0/suggests"
+DGIS_GEOCODE_URL = "https://catalog.api.2gis.com/3.0/items/geocode"
+DGIS_LOCATION = f"{CENTER_LON},{CENTER_LAT}"
 
 UNKNOWN_VALUES = {"unknown", "", "nan", "none"}
 
@@ -69,6 +73,14 @@ class GeocodeResult:
     lat: float
     lon: float
     precision: str  # "house" | "street" | "district"
+
+
+@dataclass(frozen=True)
+class AddressSuggestion:
+    label: str
+    lat: float | None = None
+    lon: float | None = None
+    source: str = "2gis"
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -176,6 +188,124 @@ def _lookup_live(query: str | dict) -> tuple[float, float] | None:
         return _Geolocator.instance().lookup(query)
     except RuntimeError:
         return None
+
+
+def _parse_dgis_point(point: object) -> tuple[float, float] | None:
+    """Return (lat, lon) from a 2GIS point object."""
+    if isinstance(point, dict):
+        lat = point.get("lat")
+        lon = point.get("lon")
+        if lat is not None and lon is not None:
+            return float(lat), float(lon)
+    if isinstance(point, (list, tuple)) and len(point) >= 2:
+        # 2GIS documents WGS84 coordinates as lon, lat in some fields.
+        lon, lat = point[0], point[1]
+        return float(lat), float(lon)
+    return None
+
+
+def _dgis_api_key() -> str | None:
+    _load_dotenv()
+    return os.getenv(DGIS_API_KEY_ENV)
+
+
+def _dgis_item_label(item: dict) -> str:
+    for key in ("full_address_name", "address_name", "full_name"):
+        value = item.get(key)
+        if value:
+            return str(value)
+    name = item.get("name")
+    address_name = item.get("address_name")
+    if name and address_name and str(name) not in str(address_name):
+        return f"{address_name}, {name}"
+    if name:
+        return str(name)
+    address = item.get("address")
+    if isinstance(address, dict):
+        parts = [
+            address.get("street") or address.get("street_name"),
+            address.get("house") or address.get("house_number") or address.get("number"),
+        ]
+        joined = ", ".join(str(part).strip() for part in parts if part)
+        if joined:
+            return joined
+        value = address.get("full_name") or address.get("name")
+        if value:
+            return str(value)
+    return ""
+
+
+def dgis_suggest_addresses(query: str, page_size: int = 8) -> list[AddressSuggestion]:
+    """Return 2GIS address suggestions near Saint Petersburg."""
+    api_key = _dgis_api_key()
+    q = str(query or "").strip()
+    if not api_key or len(q) < 3:
+        return []
+
+    params = {
+        "q": q if CITY.lower() in q.lower() else f"{CITY}, {q}",
+        "key": api_key,
+        "locale": "ru_RU",
+        "suggest_type": "address",
+        "fields": "items.point,items.full_address_name,items.address,items.address_name",
+        "location": DGIS_LOCATION,
+        "page_size": page_size,
+    }
+    try:
+        response = requests.get(DGIS_SUGGEST_URL, params=params, timeout=5)
+        response.raise_for_status()
+    except requests.RequestException:
+        return []
+
+    items = response.json().get("result", {}).get("items", [])
+    suggestions: list[AddressSuggestion] = []
+    seen: set[str] = set()
+    for item in items:
+        label = _dgis_item_label(item)
+        if not label or label in seen:
+            continue
+        point = _parse_dgis_point(item.get("point"))
+        if point is not None and not within_spb_serving_area(point):
+            continue
+        suggestions.append(
+            AddressSuggestion(
+                label=label,
+                lat=point[0] if point else None,
+                lon=point[1] if point else None,
+            )
+        )
+        seen.add(label)
+    return suggestions
+
+
+def dgis_geocode_address(query: str) -> GeocodeResult | None:
+    """Resolve an address through 2GIS Geocoder API."""
+    api_key = _dgis_api_key()
+    q = str(query or "").strip()
+    if not api_key or len(q) < 3:
+        return None
+
+    params = {
+        "q": q if CITY.lower() in q.lower() else f"{CITY}, {q}",
+        "key": api_key,
+        "locale": "ru_RU",
+        "fields": "items.point,items.full_address_name,items.address,items.address_name",
+        "location": DGIS_LOCATION,
+        "sort": "distance",
+        "page_size": 5,
+    }
+    try:
+        response = requests.get(DGIS_GEOCODE_URL, params=params, timeout=7)
+        response.raise_for_status()
+    except requests.RequestException:
+        return None
+
+    items = response.json().get("result", {}).get("items", [])
+    for item in items:
+        point = _parse_dgis_point(item.get("point"))
+        if point is not None and within_spb_serving_area(point):
+            return GeocodeResult(point[0], point[1], "house")
+    return None
 
 
 def _make_route_key(lat1: float, lon1: float, lat2: float, lon2: float) -> str:
@@ -381,6 +511,100 @@ def _within_spb_bbox(latlon: tuple[float, float]) -> bool:
     """
     lat, lon = latlon
     return 59.5 <= lat <= 60.3 and 29.4 <= lon <= 30.9
+
+
+def within_spb_serving_area(latlon: tuple[float, float]) -> bool:
+    """Stricter serving-time guard for ambiguous user-entered addresses.
+
+    The offline pipeline keeps a broader bbox because CIAN has listings across
+    all official SPB districts.  At serving time we use a tighter demo guard so
+    vague addresses do not resolve to nearby satellite towns such as Pushkin.
+    """
+    lat, lon = latlon
+    return 59.80 <= lat <= 60.15 and 29.65 <= lon <= 30.70
+
+
+def geocode_freeform_address(
+    street: str | None,
+    house_number: str | None,
+    cache: dict | None = None,
+) -> GeocodeResult | None:
+    """Resolve a user-entered SPB address without requiring district input."""
+    if cache is None:
+        cache = _load_json(GEOCODE_CACHE_PATH)
+
+    street_clean = "" if _is_unknown(street) else str(street).strip()
+    house_clean = "" if _is_unknown(house_number) else str(house_number).strip()
+    full_address = f"{street_clean} {house_clean}".strip()
+    if not full_address:
+        return None
+    legacy_street = street_clean
+    legacy_house = house_clean
+    if not legacy_house and "," in street_clean:
+        maybe_street, maybe_house = street_clean.rsplit(",", 1)
+        legacy_street = maybe_street.strip()
+        legacy_house = maybe_house.strip()
+
+    dgis_result = dgis_geocode_address(full_address)
+    if dgis_result is not None:
+        key = _make_address_key("serving_house", "", full_address, "")
+        cache[key] = {"lat": dgis_result.lat, "lon": dgis_result.lon}
+        _save_json(cache, GEOCODE_CACHE_PATH)
+        return dgis_result
+
+    key = _make_address_key("serving_house", "", full_address, "")
+    cached = cache.get(key)
+    if cached:
+        latlon = (float(cached["lat"]), float(cached["lon"]))
+        if within_spb_serving_area(latlon):
+            return GeocodeResult(latlon[0], latlon[1], "house")
+        return None
+
+    if legacy_street and legacy_house:
+        legacy_suffix = f"|{legacy_street.strip().lower()}|{legacy_house.strip().lower()}"
+        for legacy_key, legacy_value in cache.items():
+            if not legacy_key.startswith("house|") or not legacy_key.endswith(legacy_suffix):
+                continue
+            latlon = (float(legacy_value["lat"]), float(legacy_value["lon"]))
+            if within_spb_serving_area(latlon):
+                cache[key] = {"lat": latlon[0], "lon": latlon[1]}
+                _save_json(cache, GEOCODE_CACHE_PATH)
+                return GeocodeResult(latlon[0], latlon[1], "house")
+
+    return None
+
+
+def nearest_district(lat: float, lon: float) -> str | None:
+    """Infer the closest known SPB district centroid for serving features."""
+    centroids = _load_district_centroids_or_seed()
+    if not centroids:
+        return None
+    return min(
+        centroids,
+        key=lambda district: haversine_km(lat, lon, centroids[district]["lat"], centroids[district]["lon"]),
+    )
+
+
+def nearest_metro(lat: float, lon: float, cache: dict | None = None) -> tuple[str, float] | None:
+    """Return closest metro station name and haversine distance in km."""
+    if cache is None:
+        cache = _load_json(METRO_COORDS_PATH)
+    candidates = {
+        name: coords
+        for name, coords in cache.items()
+        if isinstance(coords, dict) and "lat" in coords and "lon" in coords
+    }
+    if not candidates:
+        candidates = METRO_SEED_COORDS
+    if not candidates:
+        return None
+
+    name = min(
+        candidates,
+        key=lambda station: haversine_km(lat, lon, candidates[station]["lat"], candidates[station]["lon"]),
+    )
+    coords = candidates[name]
+    return name, haversine_km(lat, lon, float(coords["lat"]), float(coords["lon"]))
 
 
 def enrich_listing(

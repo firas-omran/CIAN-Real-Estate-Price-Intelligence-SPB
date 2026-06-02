@@ -3,7 +3,7 @@
 import logging
 import time
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from src.api.predictor import predict_price
@@ -34,7 +34,7 @@ class PredictionRequest(BaseModel):
     total_meters: float = Field(gt=10, le=500)
     floor: int = Field(ge=1, le=100)
     floors_count: int = Field(ge=1, le=100)
-    district: str
+    district: str | None = None
     underground: str = "unknown"
     author_type: str = "real_estate_agent"
     street: str | None = None
@@ -62,7 +62,10 @@ def health():
 @app.post("/predict", response_model=PredictionResponse)
 def predict(request: PredictionRequest):
     started = time.perf_counter()
-    result = predict_price(**request.dict())
+    try:
+        result = predict_price(**request.dict())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     http_latency_ms = (time.perf_counter() - started) * 1000
 
     logger.info(
