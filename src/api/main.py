@@ -1,12 +1,19 @@
 """FastAPI сервис для предсказания цен на недвижимость."""
 
+import logging
 import time
 
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
 from src.api.predictor import predict_price
-from src.api.telemetry import PREDICTION_LATENCY, publish_prediction_event, record_prediction_metrics
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
 try:
     from prometheus_client import make_asgi_app
@@ -42,6 +49,8 @@ class PredictionResponse(BaseModel):
     model_name: str
     geo_precision: str | None
     distance_to_center_km: float | None
+    distance_to_metro_route_km: float | None = None
+    features: dict | None = None
     kafka_event_published: bool = False
 
 
@@ -54,22 +63,19 @@ def health():
 def predict(request: PredictionRequest):
     started = time.perf_counter()
     result = predict_price(**request.dict())
-    latency_seconds = time.perf_counter() - started
-    if PREDICTION_LATENCY is not None:
-        PREDICTION_LATENCY.observe(latency_seconds)
+    http_latency_ms = (time.perf_counter() - started) * 1000
 
-    record_prediction_metrics(result["model_name"], result["predicted_price"], status="ok")
-    kafka_event_published = publish_prediction_event(
-        {
-            "model_name": result["model_name"],
-            "predicted_price": result["predicted_price"],
-            "predicted_price_per_sqm": result["predicted_price_per_sqm"],
-            "district": request.district,
-            "rooms_count": request.rooms_count,
-            "total_meters": request.total_meters,
-            "latency_ms": round(latency_seconds * 1000, 2),
-        }
+    logger.info(
+        "http predict: model=%s district=%s rooms=%d area=%.0f price=%.0f http_latency_ms=%.1f kafka=%s",
+        result["model_name"],
+        request.district,
+        request.rooms_count,
+        request.total_meters,
+        result["predicted_price"],
+        http_latency_ms,
+        result.get("kafka_event_published", False),
     )
+
     return PredictionResponse(
         predicted_price=result["predicted_price"],
         predicted_price_per_sqm=result["predicted_price_per_sqm"],
@@ -78,5 +84,7 @@ def predict(request: PredictionRequest):
         model_name=result["model_name"],
         geo_precision=result["features"].get("geo_precision"),
         distance_to_center_km=result["features"].get("distance_to_center_km"),
-        kafka_event_published=kafka_event_published,
+        distance_to_metro_route_km=result["features"].get("distance_to_metro_route_km"),
+        features=result["features"],
+        kafka_event_published=result.get("kafka_event_published", False),
     )

@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 try:
     from kafka import KafkaProducer
@@ -78,15 +81,25 @@ def publish_prediction_event(payload: dict[str, Any]) -> bool:
     }
     try:
         producer.send(topic, event)
+        logger.debug("kafka event published: topic=%s model=%s price=%.0f", topic, payload.get("model_name"), payload.get("predicted_price", 0))
         return True
     except Exception:
+        logger.warning("failed to publish kafka event to topic=%s", topic, exc_info=True)
         return False
 
 
-def record_prediction_metrics(model_name: str, predicted_price: float, status: str = "ok") -> None:
+def record_prediction_metrics(
+    model_name: str, predicted_price: float, latency_ms: float | None = None, status: str = "ok"
+) -> None:
     """Update Prometheus metrics when prometheus-client is installed."""
     if PREDICTION_COUNTER is None:
         return
     PREDICTION_COUNTER.labels(model_name=model_name, status=status).inc()
     if status == "ok":
         PREDICTION_PRICE_HISTOGRAM.observe(predicted_price)
+    if latency_ms is not None and PREDICTION_LATENCY is not None:
+        PREDICTION_LATENCY.observe(latency_ms / 1000.0)
+    logger.info(
+        "metrics recorded: model=%s status=%s price=%.0f latency_ms=%.1f",
+        model_name, status, predicted_price, latency_ms if latency_ms else -1,
+    )

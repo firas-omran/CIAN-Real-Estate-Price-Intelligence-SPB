@@ -1,0 +1,15 @@
+version: "3"
+
+tunnels:
+  fastapi:
+    proto: http
+    addr: 8000
+  grafana:
+    proto: http
+    addr: 3000
+  kafka-ui:
+    proto: http
+    addr: 8085
+  streamlit:
+    proto: http
+    addr: 8501
