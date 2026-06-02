@@ -163,7 +163,7 @@ def _resolve_serving_geo(
         return inferred_district, inferred_underground, {
             "lat": address_result.lat,
             "lon": address_result.lon,
-            "geo_precision": "house",
+            "geo_precision": address_result.precision,
             "distance_to_center_km": distance_center,
             "distance_to_metro_km": distance_metro,
             "distance_to_metro_route_km": distance_metro,
