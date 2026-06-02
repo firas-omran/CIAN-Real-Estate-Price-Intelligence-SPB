@@ -33,6 +33,7 @@ logging.basicConfig(
 logger = logging.getLogger("streamlit")
 
 API_URL = os.getenv("API_URL", "").rstrip("/")
+USE_REMOTE_API = os.getenv("USE_REMOTE_API", "false").strip().lower() in {"1", "true", "yes"}
 ADDRESS_LABEL_PATTERN = re.compile(r"[A-Za-zА-Яа-яЁё]")
 
 
@@ -44,7 +45,7 @@ def _call_predict_api(**kwargs: object) -> dict:
     server side.  Without API_URL the function calls predict_price directly —
     this is the dev/local fallback.
     """
-    if API_URL:
+    if API_URL and USE_REMOTE_API:
         payload = {k: v for k, v in kwargs.items() if v is not None}
         payload.setdefault("street", "")
         payload.setdefault("house_number", "")
