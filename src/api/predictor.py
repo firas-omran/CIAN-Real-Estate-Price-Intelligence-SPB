@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -11,6 +13,9 @@ import numpy as np
 import pandas as pd
 
 from src.features.geocoder import enrich_listing
+from src.api.telemetry import publish_prediction_event, record_prediction_metrics
+
+logger = logging.getLogger(__name__)
 
 METRICS_PATH = Path("data/experiments/checkpoint3_metrics.csv")
 MODEL_DIR = Path("data/models")
@@ -116,13 +121,48 @@ def make_feature_row(
 
 
 def predict_price(**kwargs: Any) -> dict[str, Any]:
-    """Predict price per square meter and reconstructed apartment price."""
+    """Predict price per square meter and reconstructed apartment price.
+
+    Emits Prometheus metrics and publishes a Kafka event when the required
+    packages and environment variables are available.  Both the FastAPI
+    endpoint and the Streamlit UI share this function, so telemetry is
+    recorded regardless of the entry point.
+    """
+    started = time.perf_counter()
     model_name, model = load_best_model()
     features = make_feature_row(**kwargs)
     pred_log = float(model.predict(features)[0])
     price_per_sqm = float(np.expm1(pred_log))
     total_meters = float(features.loc[0, "total_meters"])
     predicted_price = price_per_sqm * total_meters
+    latency_ms = (time.perf_counter() - started) * 1000
+
+    # --- telemetry (no-op when packages/env are missing) ---
+    record_prediction_metrics(model_name, predicted_price, latency_ms=latency_ms, status="ok")
+    district = str(features.loc[0, "district"]) if "district" in features.columns else "unknown"
+    kafka_event_published = publish_prediction_event(
+        {
+            "model_name": model_name,
+            "predicted_price": predicted_price,
+            "predicted_price_per_sqm": price_per_sqm,
+            "district": district,
+            "rooms_count": int(features.loc[0, "rooms_count"]) if "rooms_count" in features.columns else -1,
+            "total_meters": total_meters,
+            "latency_ms": round(latency_ms, 2),
+        }
+    )
+
+    logger.info(
+        "prediction: model=%s district=%s rooms=%d area=%.0f price=%.0f price_per_sqm=%.0f latency_ms=%.1f kafka=%s",
+        model_name,
+        district,
+        int(features.loc[0, "rooms_count"]) if "rooms_count" in features.columns else -1,
+        total_meters,
+        predicted_price,
+        price_per_sqm,
+        latency_ms,
+        kafka_event_published,
+    )
 
     return {
         "model_name": model_name,
@@ -131,4 +171,5 @@ def predict_price(**kwargs: Any) -> dict[str, Any]:
         "price_range_low": predicted_price * 0.85,
         "price_range_high": predicted_price * 1.15,
         "features": features.iloc[0].to_dict(),
+        "kafka_event_published": kafka_event_published,
     }

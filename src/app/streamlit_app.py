@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import logging
+import os
 import sys
+import time
 from pathlib import Path
 
+import requests
 import streamlit as st
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -13,6 +17,58 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.api.predictor import predict_price, serving_options
 from src.monitoring.checkpoint4 import monitoring_snapshot
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+)
+logger = logging.getLogger("streamlit")
+
+API_URL = os.getenv("API_URL", "").rstrip("/")
+
+
+def _call_predict_api(**kwargs: object) -> dict:
+    """Call the FastAPI /predict endpoint, or fall back to in-process prediction.
+
+    When API_URL is set (e.g. to the ngrok/bore public tunnel), an HTTP POST is
+    sent so that Prometheus metrics, Kafka events and logs are recorded on the
+    server side.  Without API_URL the function calls predict_price directly —
+    this is the dev/local fallback.
+    """
+    if API_URL:
+        payload = {k: v for k, v in kwargs.items() if v is not None and k not in ("street", "house_number")}
+        payload.setdefault("street", "")
+        payload.setdefault("house_number", "")
+        started = time.perf_counter()
+        response = requests.post(f"{API_URL}/predict", json=payload, timeout=15)
+        http_ms = (time.perf_counter() - started) * 1000
+        response.raise_for_status()
+        result = response.json()
+        logger.info(
+            "streamlit->api: model=%s district=%s rooms=%d area=%.0f price=%.0f http_ms=%.1f kafka=%s",
+            result.get("model_name", "?"),
+            kwargs.get("district", "?"),
+            kwargs.get("rooms_count", -1),
+            kwargs.get("total_meters", 0),
+            result.get("predicted_price", 0),
+            http_ms,
+            result.get("kafka_event_published", False),
+        )
+        # Re-wrap features dict back from JSON (keys become plain strings)
+        features = result.get("features", {})
+        return {
+            "model_name": result["model_name"],
+            "predicted_price": result["predicted_price"],
+            "predicted_price_per_sqm": result["predicted_price_per_sqm"],
+            "price_range_low": result.get("price_range_low", result["predicted_price"] * 0.85),
+            "price_range_high": result.get("price_range_high", result["predicted_price"] * 1.15),
+            "features": features,
+            "kafka_event_published": result.get("kafka_event_published", False),
+        }
+
+    # Fallback: direct in-process call (no FastAPI available)
+    return predict_price(**{k: v for k, v in kwargs.items() if not k.startswith("_")})
 
 
 def rub(value: float) -> str:
@@ -52,7 +108,8 @@ with predict_tab:
         st.sidebar.warning("Этаж не должен быть больше количества этажей в доме.")
 
     if st.sidebar.button("Оценить стоимость", type="primary", disabled=floor > floors_count):
-        result = predict_price(
+        started = time.perf_counter()
+        result = _call_predict_api(
             rooms_count=rooms_count,
             total_meters=total_meters,
             floor=floor,
@@ -62,6 +119,17 @@ with predict_tab:
             author_type=author_type,
             street=street or None,
             house_number=house_number or None,
+        )
+        ui_latency_ms = (time.perf_counter() - started) * 1000
+        logger.info(
+            "streamlit prediction: model=%s district=%s rooms=%d area=%.0f price=%.0f ui_latency_ms=%.1f kafka=%s",
+            result["model_name"],
+            district,
+            rooms_count,
+            total_meters,
+            result["predicted_price"],
+            ui_latency_ms,
+            result.get("kafka_event_published", False),
         )
 
         col1, col2, col3 = st.columns(3)
