@@ -15,6 +15,7 @@ import argparse
 import json
 import math
 import os
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -59,6 +60,7 @@ DGIS_GEOCODE_URL = "https://catalog.api.2gis.com/3.0/items/geocode"
 DGIS_LOCATION = f"{CENTER_LON},{CENTER_LAT}"
 
 UNKNOWN_VALUES = {"unknown", "", "nan", "none"}
+ADDRESS_LABEL_PATTERN = re.compile(r"(?=.*[A-Za-zА-Яа-яЁё])(?=.*\d)")
 
 METRO_SEED_COORDS: dict[str, dict[str, float]] = {
     "Девяткино": {"lat": 60.0498, "lon": 30.4427},
@@ -235,6 +237,13 @@ def _dgis_item_label(item: dict) -> str:
     return ""
 
 
+def _looks_like_house_address(label: str) -> bool:
+    text = str(label or "").strip()
+    if not ADDRESS_LABEL_PATTERN.search(text):
+        return False
+    return not text.replace(" ", "").replace("-", "").isdigit()
+
+
 def dgis_suggest_addresses(query: str, page_size: int = 8) -> list[AddressSuggestion]:
     """Return 2GIS address suggestions near Saint Petersburg."""
     api_key = _dgis_api_key()
@@ -262,7 +271,7 @@ def dgis_suggest_addresses(query: str, page_size: int = 8) -> list[AddressSugges
     seen: set[str] = set()
     for item in items:
         label = _dgis_item_label(item)
-        if not label or label in seen:
+        if not label or label in seen or not _looks_like_house_address(label):
             continue
         point = _parse_dgis_point(item.get("point"))
         if point is not None and not within_spb_serving_area(point):

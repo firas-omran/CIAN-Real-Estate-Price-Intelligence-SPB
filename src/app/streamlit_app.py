@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -32,6 +33,7 @@ logging.basicConfig(
 logger = logging.getLogger("streamlit")
 
 API_URL = os.getenv("API_URL", "").rstrip("/")
+ADDRESS_LABEL_PATTERN = re.compile(r"(?=.*[A-Za-zА-Яа-яЁё])(?=.*\d)")
 
 
 def _call_predict_api(**kwargs: object) -> dict:
@@ -97,6 +99,13 @@ def _search_address_suggestions(searchterm: str) -> list[str]:
     return _cached_dgis_suggestions(searchterm)
 
 
+def _looks_like_selected_address(value: str) -> bool:
+    text = str(value or "").strip()
+    if not ADDRESS_LABEL_PATTERN.search(text):
+        return False
+    return not text.replace(" ", "").replace("-", "").isdigit()
+
+
 st.set_page_config(
     page_title="CIAN Real Estate Price Intelligence",
     layout="wide",
@@ -118,7 +127,6 @@ with predict_tab:
                 key="address_searchbox",
                 label="Адрес",
                 placeholder="Начните вводить адрес: Невский проспект, 81",
-                default_options=options.get("address_examples", [])[:8],
             )
         selected_address = str(selected_address or "").strip()
     else:
@@ -145,6 +153,7 @@ with predict_tab:
     resolved_address = selected_address
     if selected_address:
         st.sidebar.caption(f"Выбранный адрес: {selected_address}")
+    valid_address_selected = _looks_like_selected_address(resolved_address)
 
     rooms_count = st.sidebar.selectbox(
         "Количество комнат",
@@ -158,10 +167,10 @@ with predict_tab:
 
     if floor > floors_count:
         st.sidebar.warning("Этаж не должен быть больше количества этажей в доме.")
-    if not resolved_address.strip():
-        st.sidebar.warning("Введите адрес квартиры с номером дома.")
+    if not valid_address_selected:
+        st.sidebar.warning("Выберите полный адрес с номером дома из подсказок 2GIS.")
 
-    if st.sidebar.button("Оценить стоимость", type="primary", disabled=floor > floors_count or not resolved_address.strip()):
+    if st.sidebar.button("Оценить стоимость", type="primary", disabled=floor > floors_count or not valid_address_selected):
         started = time.perf_counter()
         try:
             result = _call_predict_api(
