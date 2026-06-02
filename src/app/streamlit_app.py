@@ -47,7 +47,11 @@ def _call_predict_api(**kwargs: object) -> dict:
         payload.setdefault("street", "")
         payload.setdefault("house_number", "")
         started = time.perf_counter()
-        response = requests.post(f"{API_URL}/predict", json=payload, timeout=15)
+        try:
+            response = requests.post(f"{API_URL}/predict", json=payload, timeout=15)
+        except requests.RequestException as exc:
+            logger.warning("streamlit->api failed, falling back to in-process prediction: %s", exc)
+            return predict_price(**{k: v for k, v in kwargs.items() if not k.startswith("_")})
         http_ms = (time.perf_counter() - started) * 1000
         response.raise_for_status()
         result = response.json()
