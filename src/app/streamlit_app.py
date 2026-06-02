@@ -33,7 +33,7 @@ logging.basicConfig(
 logger = logging.getLogger("streamlit")
 
 API_URL = os.getenv("API_URL", "").rstrip("/")
-ADDRESS_LABEL_PATTERN = re.compile(r"(?=.*[A-Za-zА-Яа-яЁё])(?=.*\d)")
+ADDRESS_LABEL_PATTERN = re.compile(r"[A-Za-zА-Яа-яЁё]")
 
 
 def _call_predict_api(**kwargs: object) -> dict:
@@ -168,7 +168,7 @@ with predict_tab:
     if floor > floors_count:
         st.sidebar.warning("Этаж не должен быть больше количества этажей в доме.")
     if not valid_address_selected:
-        st.sidebar.warning("Выберите полный адрес с номером дома из подсказок 2GIS.")
+        st.sidebar.warning("Выберите адрес или улицу из подсказок 2GIS.")
 
     if st.sidebar.button("Оценить стоимость", type="primary", disabled=floor > floors_count or not valid_address_selected):
         started = time.perf_counter()

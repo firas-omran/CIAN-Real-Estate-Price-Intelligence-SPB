@@ -34,6 +34,7 @@ GEOCODE_CACHE_PATH = Path("data/cache/geocode_cache.json")
 BASELINE_MODEL = "B2_non_ml_baseline"
 HOUSE_NUMBER_PATTERN = re.compile(r"^\s*\d+")
 ADDRESS_HAS_NUMBER_PATTERN = re.compile(r"\d")
+ADDRESS_HAS_LETTER_PATTERN = re.compile(r"[A-Za-zА-Яа-яЁё]")
 
 
 def _room_segment(rooms_count: int) -> str:
@@ -123,10 +124,10 @@ def _validate_address(street: str | None, house_number: str | None) -> None:
         return
     if not str(street or "").strip():
         raise ValueError("Введите адрес квартиры.")
+    if ADDRESS_HAS_LETTER_PATTERN.search(str(street or "")) is None:
+        raise ValueError("Введите адрес или улицу, а не только цифры.")
     if str(house_number or "").strip() and HOUSE_NUMBER_PATTERN.match(str(house_number or "")) is None:
         raise ValueError("Номер дома должен начинаться с цифры, например: 28, 10к2, 7литА.")
-    if not str(house_number or "").strip() and ADDRESS_HAS_NUMBER_PATTERN.search(str(street or "")) is None:
-        raise ValueError("Введите адрес с номером дома, например: Невский проспект, 81.")
 
 
 def _resolve_serving_geo(
